@@ -1,0 +1,82 @@
+var document = {
+	pages: [
+		{
+			// images
+			width: 595,
+			height: 842,
+			boxes: [
+					{
+						bottom:10,
+						left:10,
+						width:100,
+						height:100
+						image : {
+							path: './helloWorld.jpg',
+							transformation: {
+								fit:'always',
+								proportional:true
+							}
+						}
+					},
+					{
+						bottom:10,
+						left:10,
+						image : {
+							path: './helloWorld1.pdf'
+							index:1
+						}
+					}
+				]
+		},
+		{
+			// text
+			width: 595,
+			height: 842,
+			boxes: [
+					{
+						bottom:10,
+						left:10,
+						text: [
+							'what the ??',
+							'more text'
+						]
+					},
+					{
+						bottom:100,
+						left:10,
+						text: 'you can do text like this as well'
+					},
+					{
+						bottom:200,
+						left:10,
+						width:100,
+						height:100,
+						text: 'then also fit it in a box'
+					}					
+				]
+		},
+		{
+			// primitives
+			width: 595,
+			height: 842,
+			boxes: [
+					{
+						
+					}
+				]
+		}		
+	]
+}
+
+
+- width and height for boxes are optional. they are meaningful for contexts where there's fitting to do. otherwise, boxes are use simply for positioning of their content
+
+TODOs:
+- need to add something for color/font/size and for primitives
+- primitives have fill/stroke
+- texts should allow defining specifics for their style
+
+
+
+
+

@@ -1,0 +1,59 @@
+{
+	"pages": [
+		{
+			"width": 595,
+			"height": 842,
+			"boxes": [
+					{
+						"bottom":10,
+						"left":10,
+						"width":200,
+						"height":200,
+						"image" : {
+							"path": "./img1.jpg",
+							"transformation": {
+								"proportional":true
+							}						
+						}
+					},
+					{
+						"bottom":0,
+						"left":0,
+						"image" : {
+							"path": "./img3.pdf",
+							"index":1
+						}
+					},
+					{
+						"bottom":200,
+						"left":10,
+						"image" : {
+							"path": "./img2.jpg",
+							"transformation": [0.5,0,0,0.5,0,0]
+						}
+					},
+					{
+						"bottom":200,
+						"left":200,
+						"items": [
+							{
+								"type": "image",
+								"path": "./img4.jpg",
+								"transformation": [0.1,0,0,0.1,0,0]
+							},
+							{
+								"type": "image",
+								"path": "./img5.jpg",
+								"transformation": [0.3,0,0,0.3,100,0]
+							}
+						]
+					}
+				]
+		},
+		{
+		},
+		{
+			"height": 595
+		}		
+	]
+}

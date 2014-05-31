@@ -1,0 +1,15 @@
+{
+  "name": "hummusrenderer",
+  "version": "0.0.0",
+  "description": "render PDF by declaration",
+  "main": "hummusrenderer.js",
+  "dependencies": {
+    "hummus": "~1.0.26"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
