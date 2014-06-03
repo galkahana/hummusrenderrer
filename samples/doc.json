@@ -4,53 +4,111 @@
 			"width": 595,
 			"height": 842,
 			"boxes": [
-					{
-						"bottom":10,
-						"left":10,
-						"width":200,
-						"height":200,
-						"image" : {
-							"path": "./img1.jpg",
-							"transformation": {
-								"proportional":true
-							}						
-						}
-					},
-					{
-						"bottom":0,
-						"left":0,
-						"image" : {
-							"path": "./img3.pdf",
-							"index":1
-						}
-					},
-					{
-						"bottom":200,
-						"left":10,
-						"image" : {
-							"path": "./img2.jpg",
-							"transformation": [0.5,0,0,0.5,0,0]
-						}
-					},
-					{
-						"bottom":200,
-						"left":200,
-						"items": [
-							{
-								"type": "image",
-								"path": "./img4.jpg",
-								"transformation": [0.1,0,0,0.1,0,0]
-							},
-							{
-								"type": "image",
-								"path": "./img5.jpg",
-								"transformation": [0.3,0,0,0.3,100,0]
+						{
+							"bottom":10,
+							"left":10,
+							"width":200,
+							"height":200,
+							"image" : {
+								"path": "./img1.jpg",
+								"transformation": {
+									"proportional":true
+								}						
 							}
-						]
-					}
-				]
+						},
+						{
+							"bottom":0,
+							"left":0,
+							"image" : {
+								"path": "./img3.pdf",
+								"index":1
+							}
+						},
+						{
+							"bottom":200,
+							"left":10,
+							"image" : {
+								"path": "./img2.jpg",
+								"transformation": [0.5,0,0,0.5,0,0]
+							}
+						},
+						{
+							"bottom":200,
+							"left":200,
+							"items": [
+								{
+									"type": "image",
+									"path": "./img4.jpg",
+									"transformation": [0.1,0,0,0.1,0,0]
+								},
+								{
+									"type": "image",
+									"path": "./img5.jpg",
+									"transformation": [0.3,0,0,0.3,100,0]
+								}
+							]
+						}
+					]
 		},
 		{
+			"width": 595,
+			"height": 842,
+			"boxes": [
+						{
+							"bottom":0,
+							"left":0,
+							"shape" : {
+								"method":"rectangle",
+								"width":400,
+								"height":300,
+								"options": {
+									"type":"fill",
+									"color":"red"
+								}
+
+							}
+						},
+						{
+							"bottom":100,
+							"left":100,
+							"items": [
+								{
+									"type":"shape",
+									"method":"square",
+									"width":200,
+									"options": {
+										"type":"stroke",
+										"color":"blue"
+									}
+
+								},
+								{
+									"type":"shape",
+									"method":"circle",
+									"radius":100,
+									"options": {
+										"type":"fill",
+										"color":"green"
+									}
+
+								}
+							]
+						},
+						{
+							"bottom":500,
+							"left":200,
+							"shape" : {
+								"method":"path",
+								"points": [0,0,74,160,150,0],
+								"options": {
+									"type":"stroke",
+									"color":"purple",
+									"close":true
+								}
+
+							}
+						}
+					]
 		},
 		{
 			"height": 595

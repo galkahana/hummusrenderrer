@@ -75,7 +75,12 @@ TODOs:
 - need to add something for color/font/size and for primitives
 - primitives have fill/stroke
 - texts should allow defining specifics for their style
+- images external URLs
+- fonts external URLs
+- as a service that can get post requests
 
+later:
+	- extensibility?!
 
 
 

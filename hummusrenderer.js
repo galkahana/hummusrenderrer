@@ -45,13 +45,22 @@ function renderBox(inBox,inPDFPage,inPDFWriter)
 	}
 	else if(inBox.image)
 		renderImageItem(inBox,inBox.image,inPDFPage,inPDFWriter);
+	else if(inBox.shape)
+		renderShapeItem(inBox,inBox.shape,inPDFPage,inPDFWriter);
 
 }
 
 function renderItem(inBox,inItem,inPDFPage,inPDFWriter)
 {
-	if(inItem.type == 'image')
-		renderImageItem(inBox,inItem,inPDFPage,inPDFWriter);
+	switch(inItem.type)
+	{
+		case 'image': 
+			renderImageItem(inBox,inItem,inPDFPage,inPDFWriter);
+			break;
+		case 'shape':
+			renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter);
+	}
+
 }
 
 function isArray(o) {
@@ -71,4 +80,35 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter)
 	}
 
 	inPDFWriter.startPageContentContext(inPDFPage).drawImage(inBox.left,inBox.bottom,inItem.path,opts);
+}
+
+function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter)
+{
+	switch(inItem.method)
+	{
+		case 'rectangle':
+			inPDFWriter.startPageContentContext(inPDFPage).drawRectangle(inBox.left,inBox.bottom,inItem.width,inItem.height,inItem.options);
+			break;
+		case 'square':
+			inPDFWriter.startPageContentContext(inPDFPage).drawSquare(inBox.left,inBox.bottom,inItem.width,inItem.options);
+			break;
+		case 'circle':
+			// translate bottom/left to center
+			inPDFWriter.startPageContentContext(inPDFPage).drawCircle(inBox.left+inItem.radius,inBox.bottom+inItem.radius,inItem.radius,inItem.options);
+			break;
+		case 'path':
+			// translate bottom left to paths points
+			var args = inItem.points.slice();
+			for(var i=0;i<args.length;i+=2)
+			{
+				args[i]+=inBox.left;
+				args[i+1]+=inBox.bottom;
+			}
+			if(inItem.options)
+				args.push(inItem.options);
+			var cxt = inPDFWriter.startPageContentContext(inPDFPage);
+			cxt.drawPath.apply(cxt,args);
+			break;
+
+	}
 }
