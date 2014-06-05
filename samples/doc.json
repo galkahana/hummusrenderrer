@@ -9,6 +9,45 @@
 							"left":10,
 							"width":200,
 							"height":200,
+							"items":[
+									{
+										"type":"shape",
+										"method":"rectangle",
+										"width":200,
+										"height":200,
+										"options": {
+											"type":"fill",
+											"color":"yellow"
+										}
+									},
+									{
+										"type":"stream",
+										"items": [
+											{
+												"type":"text",
+												"text":["so i\n was writing this text,"," and it had several items"],
+												"options": {
+													"fontPath":"./arial.ttf",
+													"size":40,
+													"color":"blue"
+												}
+
+											}
+										]						
+									}
+							]
+						}]
+
+		},
+		{
+			"width": 595,
+			"height": 842,
+			"boxes": [
+						{
+							"bottom":10,
+							"left":10,
+							"width":200,
+							"height":200,
 							"image" : {
 								"path": "./img1.jpg",
 								"transformation": {
@@ -111,7 +150,64 @@
 					]
 		},
 		{
-			"height": 595
+			"width": 595,
+			"height": 842,
+			"boxes": [
+						{
+							"bottom":500,
+							"left":10,
+							"text" : {
+								"text":"brilliant!",
+								"options": {
+									"fontPath":"./arial.ttf",
+									"size":40,
+									"color":"pink"
+								}
+
+							}
+						},				
+						{
+							"bottom":400,
+							"left":10,
+							"text" : {
+								"text":["this is too,"," defo"],
+								"options": {
+									"fontPath":"./arial.ttf",
+									"size":40,
+									"color":"blue"
+								}
+
+							}
+						},
+						{
+							"bottom":200,
+							"left":10,
+							"items" : [
+								{
+									"type":"shape",
+									"method":"rectangle",
+									"width":200,
+									"height":30,
+									"options": {
+										"type":"stroke",
+										"color":"gray"
+									}
+
+								},
+								{
+									"type":"text",
+									"text":"text in box",
+									"options": {
+										"fontPath":"./arial.ttf",
+										"size":40,
+										"color":"yellow"
+									}
+
+								}
+
+							]
+						}							
+			]
 		}		
 	]
 }

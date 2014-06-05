@@ -72,9 +72,7 @@ var document = {
 - width and height for boxes are optional. they are meaningful for contexts where there's fitting to do. otherwise, boxes are use simply for positioning of their content
 
 TODOs:
-- need to add something for color/font/size and for primitives
-- primitives have fill/stroke
-- texts should allow defining specifics for their style
+- stream composition
 - images external URLs
 - fonts external URLs
 - as a service that can get post requests
@@ -82,6 +80,53 @@ TODOs:
 later:
 	- extensibility?!
 
+
+
+1. Do a simple text item, with no "stream"
+2. Create a stream, which can accept a list of items and draw them in a box. they can be text, path, image whatnot.
+	the stream element draws them one after the other from top/left of box towards bottom where each item has height.
+	text items may be split per "words". spaces in the begining of a line are being ignored. this way i can have any item and the "stream" element
+	is simply an "arranging mechanism".
+
+let's call it stream. stream rendering and composition. with stream it is possible to define texts
+
+[
+	box
+	shape
+	text
+	image
+
+	stream items are not allowed.
+]
+
+
+Composition and drawing algorithm:
+
+1. in words:
+	texts are considered as split per words and spaces. meaning, one text element behaves simply like multiple text elements where each element has word or text. this should allow us to
+	wrap around the text. spaces in the beginning of the line are skipped.
+
+	items are placed one after another noting the line width. a structure of "current line" is maintained.
+
+	if placing the next element will overflow the line, as its width will become longer then possible, or that its height is more than is available [if height is defined], the composed line is placed, at the alloted X position, where it's Y position i below the previous line (or box top) according to 
+	a "leading" property which is a measure of the highest element height, amongst the elements in the line. that position is saved for the next line placement.
+	'placing' will mean drawing all elements in the composed line one after the other, at the defined Y position, and increased X position per their widths.
+
+	empty the composed line.
+
+	then there's an attempt to place that item that was candidate for placement in the next line. if again there's overflow placement will stop.	
+
+	when items are done, check if there's content in the composed line, and place it if so.
+
+	width/height for items are calculated in the following manner:
+		text, pert its string measurements.
+		shape, per its bounding box,
+		image, per its measurements,
+		box, show have width/height definitions
+
+
+
+	// Gal: need to also take care of line endings....provide special items for them.
 
 
 
