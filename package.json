@@ -4,7 +4,8 @@
   "description": "render PDF by declaration",
   "main": "hummusrenderer.js",
   "dependencies": {
-    "hummus": "~1.0.26"
+    "hummus": "~1.0.26",
+    "temporary": "0.0.8"
   },
   "devDependencies": {},
   "scripts": {

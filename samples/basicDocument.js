@@ -29,7 +29,7 @@ PDFStreamForFile.prototype.getCurrentPosition = function()
 fs.readFile('./doc.json',function(err,inData)
 {
 	if(err) throw err;
-	hr.render(JSON.parse(inData),new PDFStreamForFile('./output/basicDocument.pdf'),{log:'./output/basicDocument.log'});
+	hr.render(JSON.parse(inData),new PDFStreamForFile('./output/basicDocument.pdf'),{log:'./output/basicDocument.log',cleanExternals:true});
 });
 
 

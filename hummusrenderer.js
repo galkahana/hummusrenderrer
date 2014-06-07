@@ -1,17 +1,112 @@
-module.exports.render = function(inDocument,inTargetStream,inOptions)
+var hummus = require('hummus'),
+	tmp = require('temporary'),
+	http = require('http'),
+	https = require('https'),
+	fs = require('fs');
+
+
+
+module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 {
-	var writer = require('hummus').createWriter(inTargetStream,inOptions);
+	var state = new RenderingState();
 
-	renderDocument(inDocument,writer);
+	downloadExternals(inDocument.externals,function(inDownloadMap)
+		{
+			state.externalsLocalFiles = inDownloadMap;
+			var writer = hummus.createWriter(inTargetStream,inOptions);
 
-	writer.end();
+			renderDocument(inDocument,writer,state);
+
+			writer.end();			
+
+			if(inOptions.cleanExternals)
+				cleanExternals(state.externalsLocalFiles)
+
+			if(inCallback)
+				inCallback(state);
+		});
+
 }
 
 
-function renderDocument(inDocument,inPDFWriter)
+// internal state class
+function RenderingState()
+{
+	this.externalsLocalFiles = {};
+}
+
+
+RenderingState.prototype.getLocalFile = function(inExternalName)
+{
+	return this.externalsLocalFiles(inExternalName);
+};
+
+
+RenderingState.prototype.getImageItemFilePath = function(inItem)
+{
+	if(inItem.path)
+		return inItem.path;
+	else if(inItem.external)
+		return this.externalsLocalFiles[inItem.external];
+	else
+		return null;
+};
+
+RenderingState.prototype.getFontItemFilePath = function(inItem)
+{
+	if(inItem.options.fontPath)
+		return inItem.options.fontPath;
+	else if(inItem.options.fontExternal)
+		return this.externalsLocalFiles[inItem.options.fontExternal];
+	else
+		return null;
+};
+
+// download all externals
+function downloadExternals(inExternals,inCallback)
+{
+	if(!inExternals || Object.keys(inExternals).length == 0)
+	{
+		inCallback({});
+		return;
+	}
+
+	var downloadMap = {};
+	var keys = Object.keys(inExternals);
+	var index = 0;
+
+	downloadFile(inExternals[keys[index]],new tmp.File().path,function(inTargetFilePath,inThis)
+		{
+			downloadMap[keys[index]] = inTargetFilePath;
+			++index;
+			if(index < keys.length)
+				downloadFile(inExternals[keys[index]],new tmp.File().path,inThis);
+			else
+				inCallback(downloadMap);
+		});
+
+
+}
+
+function downloadFile(inFileURL,inTargetFilePath,inCallback)
+{
+
+	var file = fs.createWriteStream(inTargetFilePath);
+	var theDownloadService = inFileURL.substring(0,5) == 'https' ? https:http;
+	var request = theDownloadService.get(inFileURL, function(response) {
+  		response.pipe(file);
+		file.on('finish', function() {
+		      file.close(inCallback.bind(null,inTargetFilePath,inCallback));
+		    });  		
+	});	
+}
+
+// main rendering method (when all externals are downloaded)
+function renderDocument(inDocument,inPDFWriter,inRenderingState)
 {
 	var width;
 	var height;
+
 
 	// render pages
 	inDocument.pages.forEach(function(inPage)
@@ -26,7 +121,7 @@ function renderDocument(inDocument,inPDFWriter)
 		{
 			inPage.boxes.forEach(function(inBox)
 			{
-				renderBox(inBox,pdfPage,inPDFWriter);
+				renderBox(inBox,pdfPage,inPDFWriter,inRenderingState);
 			});
 		}
 		
@@ -34,41 +129,41 @@ function renderDocument(inDocument,inPDFWriter)
 	});
 }
 
-function renderBox(inBox,inPDFPage,inPDFWriter)
+function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 {
 	if(inBox.items)
 	{
 		inBox.items.forEach(function(inItem)
 		{
-			renderItem(inBox,inItem,inPDFPage,inPDFWriter)
+			renderItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		});
 	}
 	else if(inBox.image)
-		renderImageItem(inBox,inBox.image,inPDFPage,inPDFWriter);
+		renderImageItem(inBox,inBox.image,inPDFPage,inPDFWriter,inRenderingState);
 	else if(inBox.shape)
-		renderShapeItem(inBox,inBox.shape,inPDFPage,inPDFWriter);
+		renderShapeItem(inBox,inBox.shape,inPDFPage,inPDFWriter,inRenderingState);
 	else if(inBox.text)
-		renderTextItem(inBox,inBox.text,inPDFPage,inPDFWriter);
+		renderTextItem(inBox,inBox.text,inPDFPage,inPDFWriter,inRenderingState);
 	else if(inBox.stream)
-		renderStreamItem(inBox,inBox.stream,inPDFPage,inPDFWriter);
+		renderStreamItem(inBox,inBox.stream,inPDFPage,inPDFWriter,inRenderingState);
 
 }
 
-function renderItem(inBox,inItem,inPDFPage,inPDFWriter)
+function renderItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	switch(inItem.type)
 	{
 		case 'image': 
-			renderImageItem(inBox,inItem,inPDFPage,inPDFWriter);
+			renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState);
 			break;
 		case 'shape':
-			renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter);
+			renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState);
 			break;
 		case 'text':
-			renderTextItem(inBox,inItem,inPDFPage,inPDFWriter);
+			renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState);
 			break;
 		case 'stream':
-			renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter);
+			renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState);
 			break;
 	}
 
@@ -78,7 +173,7 @@ function isArray(o) {
   return Object.prototype.toString.call(o) === '[object Array]';
 }
 
-function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter)
+function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	var opts = {};
 
@@ -92,7 +187,7 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter)
 		opts.transformation.height = inBox.height;
 	}
 
-	inPDFWriter.startPageContentContext(inPDFPage).drawImage(inBox.left,inBox.bottom,inItem.path,opts);
+	inPDFWriter.startPageContentContext(inPDFPage).drawImage(inBox.left,inBox.bottom,inRenderingState.getImageItemFilePath(inItem),opts);
 }
 
 function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter)
@@ -125,10 +220,11 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter)
 	}
 }
 
-function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter)
+function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
-	if(inItem.options.fontPath)
-		inItem.options.font = inPDFWriter.getFontForFile(inItem.options.fontPath);
+	var fontPath = inRenderingState.getFontItemFilePath(inItem);
+	if(fontPath)
+		inItem.options.font = inPDFWriter.getFontForFile(fontPath);
 
 	inPDFWriter.startPageContentContext(inPDFPage).writeText(isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text,inBox.left,inBox.bottom,inItem.options);
 }
@@ -143,7 +239,7 @@ function joinTextArray(inStringArray)
 }
 
 
-function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
+function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	// it is possible to define a stream item with no height, that
 	// simply wraps the text according to width till the stream is ended.
@@ -178,7 +274,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 		placeLine:function()
 		{
 			this.yOffset -= this.lineSpacing();
-			placeStreamLine(this.yOffset,this.items,inPDFPage,inPDFWriter);
+			placeStreamLine(this.yOffset,this.items,inPDFPage,inPDFWriter,inRenderingState);
 			this.reset();
 		}
 	};
@@ -190,7 +286,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 		if(lineInComposition.items.length == 0 && itemsInBox[i].isSpaces)
 			continue;
 
-		var itemMeasures = getItemMeasures(itemsInBox[i],inPDFWriter);
+		var itemMeasures = getItemMeasures(itemsInBox[i],inPDFWriter,inRenderingState);
 
 		if(itemsInBox[i].isNewLine)
 		{
@@ -251,7 +347,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 }
 
 
-function getItemMeasures(inItem,inPDFWriter)
+function getItemMeasures(inItem,inPDFWriter,inRenderingState)
 {
 	if(inItem.item.width && inItem.item.height)
 	{
@@ -267,7 +363,7 @@ function getItemMeasures(inItem,inPDFWriter)
 			{
 				if(isArray(inItem.item.transformation))
 				{
-					var imageDimensions = inPDFWriter.getImageDimensions(inItem.item.path);
+					var imageDimensions = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem.item));
 					var bbox = [0,0,imageDimensions.width,imageDimensions.height];
 					var transformedBox = transformBox(bbox,inItem.item.transformation);
 					result = {width:transformedBox[2],height:transformedBox[3]};
@@ -277,7 +373,7 @@ function getItemMeasures(inItem,inPDFWriter)
 								height:inItem.item.transformation.height};
 			}
 			else
-				result = inPDFWriter.getImageDimensions(inItem.item.path); 
+				result = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem.item)); 
 			break;
 		case 'shape':
 			switch(inItem.item.method)
@@ -305,7 +401,7 @@ function getItemMeasures(inItem,inPDFWriter)
 			}				
 			break;
 		case 'text':
-			var theFont = inItem.item.options.font ? inItem.item.options.font:inPDFWriter.getFontForFile(inItem.item.options.fontPath);
+			var theFont = inItem.item.options.font ? inItem.item.options.font:inPDFWriter.getFontForFile(inRenderingState.getFontItemFilePath(inItem.item));
 			// got some bug with spaces that does not allow proper measurements
 			if(inItem.isSpaces)
 			{
@@ -426,14 +522,14 @@ function shallowCopy(inItem)
 	return newItem;
 }
 
-function placeStreamLine(inYOffset,inItems,inPDFPage,inPDFWriter)
+function placeStreamLine(inYOffset,inItems,inPDFPage,inPDFWriter,inRenderingState)
 {
 	inItems.forEach(function(inItem)
 	{
 		if(inItem.item.type)
 		{
 			// regular item, place using regular method, with a new box stating it's position
-			renderItem({left:inItem.xPosition,bottom:inYOffset},inItem.item,inPDFPage,inPDFWriter);
+			renderItem({left:inItem.xPosition,bottom:inYOffset},inItem.item,inPDFPage,inPDFWriter,inRenderingState);
 		}
 		else
 		{
@@ -443,9 +539,16 @@ function placeStreamLine(inYOffset,inItems,inPDFPage,inPDFWriter)
 			var newBox = shallowCopy(inItem.item);
 			newBox.left = inItem.xOffset;
 			newBox.bottom = inYOffset;
-			renderBox(newBox,inPDFPage,inPDFWriter);
+			renderBox(newBox,inPDFPage,inPDFWriter,inRenderingState);
 		}
 	});
 }
 
 
+function cleanExternals(externalMap)
+{
+	for(var external in externalMap)
+	{
+		fs.unlink(externalMap[external]);
+	}
+}

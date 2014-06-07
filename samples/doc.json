@@ -1,4 +1,9 @@
 {
+	"externals": {
+			"myLogo":"https://fbcdn-profile-a.akamaihd.net/hprofile-ak-xpa1/t1.0-1/c11.0.160.160/p160x160/1891153_10152151031518898_506486178_n.jpg",
+			"tents":"https://fbcdn-sphotos-g-a.akamaihd.net/hphotos-ak-xpf1/t1.0-9/1517595_764097843608615_7787140643236152593_n.jpg"
+
+	},
 	"pages": [
 		{
 			"width": 595,
@@ -158,7 +163,23 @@
 									"transformation": [0.3,0,0,0.3,100,0]
 								}
 							]
+						},
+						{
+							"bottom":500,
+							"left":10,
+							"image" : {
+								"external": "myLogo"
+							}
+						},
+						{
+							"bottom":500,
+							"left":100,
+							"image" : {
+								"external": "tents",
+								"transformation": [0.3,0,0,0.3,0,0]
+							}
 						}
+
 					]
 		},
 		{
