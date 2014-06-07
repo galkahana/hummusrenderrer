@@ -4,4 +4,5 @@ samples/output/*.log
 samples/node_modules
 node_modules
 _.swp
+pdf rendering document.txt
 
