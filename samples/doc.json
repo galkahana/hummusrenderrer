@@ -36,6 +36,78 @@
 										]						
 									}
 							]
+
+
+						},
+						{
+							"bottom":300,
+							"left":10,
+							"width":200,
+							"height":400,
+							"items":[
+									{
+										"type":"shape",
+										"method":"rectangle",
+										"width":200,
+										"height":400,
+										"options": {
+											"type":"fill",
+											"color":"gray"
+										}
+									},
+									{
+										"type":"stream",
+										"items": [
+											{
+												"type":"text",
+												"text":["then i was "],
+												"options": {
+													"fontPath":"./arial.ttf",
+													"size":20,
+													"color":"blue"
+												}
+
+											},
+											{
+												"type":"text",
+												"text":["writing some more "],
+												"options": {
+													"fontPath":"./arial.ttf",
+													"size":30,
+													"color":"red"
+												}
+
+											},
+											{
+												"type":"text",
+												"text":["text and then an image"],
+												"options": {
+													"fontPath":"./arial.ttf",
+													"size":10,
+													"color":"green"
+												}
+
+											},	
+											{
+												"type": "image",
+												"path": "./img4.jpg",
+												"transformation": [0.1,0,0,0.1,0,0]
+											},											
+											{
+												"type":"text",
+												"text":["and it all worked very well"],
+												"options": {
+													"fontPath":"./arial.ttf",
+													"size":30,
+													"color":"green"
+												}
+
+											}
+										]						
+									}
+							]
+
+							
 						}]
 
 		},

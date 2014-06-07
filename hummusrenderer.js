@@ -152,19 +152,34 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 	// if height is provided than placement is from bottom+height going down. otherwise it is from bottom
 	// (where bottom would serve as top fo the stream)
 	var xOffset = inBox.left;
-	var yOffset = inBox.bottom + (inBox.height !== undefined ? inBox.height:0);
-	var leading = inItem.leading ? inItem.leading:1.2;
-	var firstLine = true;
 
 	var lineInComposition =  {
 		items:[],
 		width:0,
 		height:0,
+		yOffset:inBox.bottom + (inBox.height !== undefined ? inBox.height:0),
+		firstLine:true,
+		leading:inItem.leading ? inItem.leading:1.2,
 		reset:function()
 		{
 			this.items = [];
 			this.width = 0;
 			this.height = 0;
+			this.firstLine = false;
+		},
+		lineSpacingModifier:function()
+		{
+			return this.firstLine?1:this.leading;
+		},
+		lineSpacing:function()
+		{
+			return this.height*this.lineSpacingModifier();
+		},
+		placeLine:function()
+		{
+			this.yOffset -= this.lineSpacing();
+			placeStreamLine(this.yOffset,this.items,inPDFPage,inPDFWriter);
+			this.reset();
 		}
 	};
 
@@ -176,12 +191,11 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 			continue;
 
 		var itemMeasures = getItemMeasures(itemsInBox[i],inPDFWriter);
-		itemsInBox[i].itemMeasures = itemMeasures;
 
 		if(itemsInBox[i].isNewLine)
 		{
 			if(inBox.height !== undefined &&
-				yOffset - itemMeasures.height*leading < inBox.bottom)
+				lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom)
 			{
 				// newline overflow, break
 				break;
@@ -190,15 +204,13 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 			if(lineInComposition.items.length > 0)
 			{
 				// place current line, and move on
-				yOffset -= lineInComposition.height*(firstLine ? 1:leading);
-				placeStreamLine(yOffset,lineInComposition.items,inPDFPage,inPDFWriter);
-				lineInComposition.reset();
-				firstLine = false;
+				lineInComposition.placeLine();
 			}
 			else
 			{
 				// empty line, just increase yOffset per the newline height. no need
-				yOffset -= itemMeasures.height*leading;
+				lineInComposition.Offset -= itemMeasures.height*lineInComposition.lineSpacingModifier();
+				lineInComposition.reset();
 			}
 		}
 		else
@@ -206,12 +218,9 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 			// check for overflow if will place the element
 			if(lineInComposition.width + itemMeasures.width > inBox.width ||
 				(inBox.height !== undefined &&
-					yOffset - itemMeasures.height*leading < inBox.bottom))
+					lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom))
 			{
-				yOffset -= lineInComposition.height*(firstLine ? 1:leading);
-				placeStreamLine(yOffset,lineInComposition.items,inPDFPage,inPDFWriter);
-				lineInComposition.reset();
-				firstLine = false;
+				lineInComposition.placeLine();
 
 				// skip if spaces
 				if(itemsInBox[i].isSpaces)
@@ -223,7 +232,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 			// check if element alone overflows, if so, quit
 			if(itemMeasures.width > inBox.width ||
 				(inBox.height !== undefined &&
-					yOffset - itemMeasures.height*leading < inBox.bottom))
+					lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom))
 			{
 				break;
 			}		
@@ -232,13 +241,13 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter)
 			itemsInBox[i].xPosition = xOffset+lineInComposition.width;
 			lineInComposition.items.push(itemsInBox[i]);
 			lineInComposition.width+=itemMeasures.width;
-			lineInComposition.height = Math.max(lineInComposition.height,firstLine? itemMeasures.height:itemsInBox[i].item.options.size);
+			lineInComposition.height = Math.max(lineInComposition.height,lineInComposition.firstLine || itemsInBox[i].item.type != 'text' ? itemMeasures.height:itemsInBox[i].item.options.size);
 		}
 	}
 
 	// if line is not empty, place it now
 	if(lineInComposition.items.length > 0)
-		placeStreamLine(yOffset-lineInComposition.height*(firstLine?1:leading),lineInComposition.items,inPDFPage,inPDFWriter);
+		lineInComposition.placeLine();
 }
 
 
@@ -254,15 +263,14 @@ function getItemMeasures(inItem,inPDFWriter)
 	switch(inItem.item.type)
 	{
 		case 'image': 
-			if(inItem.item.tranformation)
+			if(inItem.item.transformation)
 			{
-				if(isArray)
+				if(isArray(inItem.item.transformation))
 				{
 					var imageDimensions = inPDFWriter.getImageDimensions(inItem.item.path);
 					var bbox = [0,0,imageDimensions.width,imageDimensions.height];
-					var transformedBox = transformBox(bbox,inItem.item.tranformation);
-					result = {width:transformedBox[2],height:transformedBox[3]}
-
+					var transformedBox = transformBox(bbox,inItem.item.transformation);
+					result = {width:transformedBox[2],height:transformedBox[3]};
 				}
 				else
 					result = {width:inItem.item.transformation.width,
@@ -303,16 +311,16 @@ function getItemMeasures(inItem,inPDFWriter)
 			{
 				var measures = theFont.calculateTextDimensions('a'+inItem.item.text+'a',inItem.item.options.size);
 				var measuresA = theFont.calculateTextDimensions('aa',inItem.item.options.size);
-				result = {width:measures.width-measuresA.width,height:measures.height-measures.height};
+				result = {width:measures.width-measuresA.width,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
 			}
 			else if(inItem.isNewLine)
 			{
-				result = {width:0,height:inItem.item.options.size};
+				result = {width:0,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
 			}
 			else
 			{
 				var measures = theFont.calculateTextDimensions(inItem.item.text,inItem.item.options.size);
-				result = {width:measures.width,height:measures.height};
+				result = {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
 			}
 			break;
 		default:
