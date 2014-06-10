@@ -586,12 +586,14 @@ PDFStreamForFile.prototype.close = function(inCallback)
 		this.ws.end(function()
 		{
 			self.ws = null;
-			inCallback();
+			if(inCallback)
+				inCallback();
 		})
 	}
 	else
 	{
-		inCallback();
+		if(inCallback)
+			inCallback();
 	}
 };
 
