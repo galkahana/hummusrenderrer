@@ -552,3 +552,48 @@ function cleanExternals(externalMap)
 		fs.unlink(externalMap[external]);
 	}
 }
+
+function PDFStreamForFile(inPath,inOptions)
+{
+    this.ws = fs.createWriteStream(inPath,inOptions);
+    this.position = 0;
+    this.path = inPath;
+}
+
+PDFStreamForFile.prototype.write = function(inBytesArray)
+{
+    if(inBytesArray.length > 0)
+    {
+		this.ws.write(new Buffer(inBytesArray));
+        this.position+=inBytesArray.length;
+        return inBytesArray.length;
+    }
+    else
+        return 0;
+};
+
+PDFStreamForFile.prototype.getCurrentPosition = function()
+{
+    return this.position;
+};
+
+PDFStreamForFile.prototype.close = function(inCallback)
+{
+	if(this.ws)
+	{
+		var self = this;
+
+		this.ws.end(function()
+		{
+			self.ws = null;
+			inCallback();
+		})
+	}
+	else
+	{
+		inCallback();
+	}
+};
+
+module.exports.PDFStreamForFile = PDFStreamForFile;
+module.exports.PDFStreamForResponse = hummus.PDFStreamForResponse;
