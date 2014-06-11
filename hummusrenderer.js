@@ -62,6 +62,16 @@ RenderingState.prototype.getFontItemFilePath = function(inItem)
 		return null;
 };
 
+RenderingState.prototype.getFontSecondItemFilePath = function(inItem)
+{
+	if(inItem.options.fontSecondPath)
+		return inItem.options.fontSecondPath;
+	else if(inItem.options.fontSecondExternal)
+		return this.externalsLocalFiles[inItem.options.fontSecondExternal];
+	else
+		return null;
+};
+
 // download all externals
 function downloadExternals(inExternals,inCallback)
 {
@@ -222,9 +232,7 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter)
 
 function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
-	var fontPath = inRenderingState.getFontItemFilePath(inItem);
-	if(fontPath)
-		inItem.options.font = inPDFWriter.getFontForFile(fontPath);
+	inItem.options.font = getFont(inPDFWriter,inRenderingState,inItem);
 
 	inPDFWriter.startPageContentContext(inPDFPage).writeText(isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text,inBox.left,inBox.bottom,inItem.options);
 }
@@ -401,7 +409,7 @@ function getItemMeasures(inItem,inPDFWriter,inRenderingState)
 			}				
 			break;
 		case 'text':
-			var theFont = inItem.item.options.font ? inItem.item.options.font:inPDFWriter.getFontForFile(inRenderingState.getFontItemFilePath(inItem.item));
+			var theFont = getFont(inPDFWriter,inRenderingState,inItem.item);
 			// got some bug with spaces that does not allow proper measurements
 			if(inItem.isSpaces)
 			{
@@ -425,6 +433,21 @@ function getItemMeasures(inItem,inPDFWriter,inRenderingState)
 	return result;
 }
 
+function getFont(inPDFWriter,inRenderingState,inItem)
+{
+	var result; 
+	var fontPath = inRenderingState.getFontItemFilePath(inItem);
+	var secondPath = inRenderingState.getFontSecondItemFilePath(inItem);
+	if(fontPath)
+	{
+		var secondArg = secondPath ? (secondPath) : ((inItem.options && inItem.options.fontIndex) ? inItem.options.fontIndex : null);
+		result = secondArg ? inPDFWriter.getFontForFile(fontPath,secondArg) : inPDFWriter.getFontForFile(fontPath);
+	}
+	else
+		result = inItem.options.font;
+
+	return result;
+}
 
 function transformBox(inBox,inMatrix)
 {
