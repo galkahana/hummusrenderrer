@@ -12,11 +12,8 @@
     "pdfhummus"
   ],
   "homepage": "http://pdfhummus.com",
-  "author": {
-    "name": "Gal Kahana",
-    "email": "gal.kahana@hotmail.com"
-  },
+  "author": "Gal Kahana <gal.kahana@hotmail.com>",
   "license": "Apache 2.0",
   "gypfile": false,
-  "readmeFilename": "README.md",
-  }
+  "readmeFilename": "README.md"
+}
