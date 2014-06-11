@@ -1,6 +1,6 @@
 {
   "name": "hummusrenderer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "render PDF by declaration",
   "main": "hummusrenderer",
   "repository": {
@@ -11,6 +11,10 @@
     "pdf",
     "pdfhummus"
   ],
+ "dependencies": {
+      "hummus": "~1.0.26",
+     "temporary": "0.0.8"
+    },  
   "homepage": "http://pdfhummus.com",
   "author": "Gal Kahana <gal.kahana@hotmail.com>",
   "license": "Apache 2.0",
