@@ -1,16 +1,22 @@
 {
   "name": "hummusrenderer",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "render PDF by declaration",
-  "main": "hummusrenderer.js",
-  "dependencies": {
-    "hummus": "~1.0.26",
-    "temporary": "0.0.8"
+  "main": "hummusrenderer",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/galkahana/hummusrenderrer.git"
   },
-  "devDependencies": {},
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "keywords": [
+    "pdf",
+    "pdfhummus"
+  ],
+  "homepage": "http://pdfhummus.com",
+  "author": {
+    "name": "Gal Kahana",
+    "email": "gal.kahana@hotmail.com"
   },
-  "author": "",
-  "license": "ISC"
-}
+  "license": "Apache 2.0",
+  "gypfile": false,
+  "readmeFilename": "README.md",
+  }
