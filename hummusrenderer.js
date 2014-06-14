@@ -2,6 +2,7 @@ var hummus = require('hummus'),
 	tmp = require('temporary'),
 	http = require('http'),
 	https = require('https'),
+	esrever = require('esrever'),
 	fs = require('fs');
 
 
@@ -234,7 +235,11 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	inItem.options.font = getFont(inPDFWriter,inRenderingState,inItem);
 
-	inPDFWriter.startPageContentContext(inPDFPage).writeText(isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text,inBox.left,inBox.bottom,inItem.options);
+	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
+	if(inItem.direction == 'rtl')
+		theText = esrever.reverse(theText); // need to reverse the text for PDF placement
+
+	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,inBox.left,inBox.bottom,inItem.options);
 }
 
 function joinTextArray(inStringArray)
@@ -256,6 +261,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	// if height is provided than placement is from bottom+height going down. otherwise it is from bottom
 	// (where bottom would serve as top fo the stream)
 	var xOffset = inBox.left;
+	var directionIsRTL = inItem.direction == 'rtl';
 
 	var lineInComposition =  {
 		items:[],
@@ -342,7 +348,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 			}		
 
 			// items is OK for placement in line, so do so, and update its state
-			itemsInBox[i].xPosition = xOffset+lineInComposition.width;
+			itemsInBox[i].xPosition = directionIsRTL ? (xOffset + inBox.width - lineInComposition.width - itemMeasures.width): (xOffset+lineInComposition.width);
 			lineInComposition.items.push(itemsInBox[i]);
 			lineInComposition.width+=itemMeasures.width;
 			lineInComposition.height = Math.max(lineInComposition.height,lineInComposition.firstLine || itemsInBox[i].item.type != 'text' ? itemMeasures.height:itemsInBox[i].item.options.size);
@@ -423,7 +429,11 @@ function getItemMeasures(inItem,inPDFWriter,inRenderingState)
 			}
 			else
 			{
-				var measures = theFont.calculateTextDimensions(inItem.item.text,inItem.item.options.size);
+				var theText = inItem.item.text;
+				if(inItem.item.direction == 'rtl')
+					theText = esrever.reverse(theText); // need to reverse the text for PDF placement
+
+				var measures = theFont.calculateTextDimensions(theText,inItem.item.options.size);
 				result = {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
 			}
 			break;
@@ -508,7 +518,7 @@ function expendItemsForStreamPlacement(inItems)
 			// split text to its components
 			var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
 
-			var textComponents = theText.match(/\w+|[^\S\r\n]+|\r\n|\n|\r/g);
+			var textComponents = theText.match(/[^\s\r\n]+|[^\S\r\n]+|\r\n|\n|\r/g);
 			if(textComponents)
 			{
 				textComponents.forEach(function(inText)
