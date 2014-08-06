@@ -34,6 +34,7 @@ module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 function RenderingState()
 {
 	this.externalsLocalFiles = {};
+	this.boxIDToBox = {};
 }
 
 
@@ -117,6 +118,7 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 {
 	var width;
 	var height;
+	inRenderingState.theDocument = inDocument;
 
 
 	// render pages
@@ -142,6 +144,11 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 
 function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 {
+	// collect box ID
+	if(inBox.id)
+		inRenderingState.boxIDToBox[inBox.id] = inBox;
+
+	// render the box
 	if(inBox.items)
 	{
 		inBox.items.forEach(function(inItem)
@@ -198,11 +205,26 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		opts.transformation.height = inBox.height;
 	}
 
+	if(inBox.top !== undefined && inBox.bottom == undefined)
+	{
+		if(typeof(inBox.top) == 'object')
+			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
+		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getImageItemMeasures(inItem,inPDFWriter,inRenderingState).height);
+	}
+
 	inPDFWriter.startPageContentContext(inPDFPage).drawImage(inBox.left,inBox.bottom,inRenderingState.getImageItemFilePath(inItem),opts);
 }
 
-function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter)
+function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
+
+	if(inBox.top !== undefined && inBox.bottom == undefined)
+	{
+		if(typeof(inBox.top) == 'object')
+			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
+		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getShapeItemMeasures(inItem).height);
+	}
+
 	switch(inItem.method)
 	{
 		case 'rectangle':
@@ -239,7 +261,24 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	if(inItem.direction == 'rtl')
 		theText = esrever.reverse(theText); // need to reverse the text for PDF placement
 
+	if(inBox.top !== undefined && inBox.bottom == undefined)
+	{
+		if(typeof(inBox.top) == 'object')
+			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
+		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getTextItemMeasures(inItem,inPDFWriter,inRenderingState).height);
+	}
+
+
+
 	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,inBox.left,inBox.bottom,inItem.options);
+}
+
+function getTextItemMeasures(inItem,inPDFWriter,inRenderingState)
+{
+	var theFont = getFont(inPDFWriter,inRenderingState,inItem);
+
+	var measures = theFont.calculateTextDimensions(theText,inItem.options.size);
+	return {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
 }
 
 function joinTextArray(inStringArray)
@@ -251,23 +290,38 @@ function joinTextArray(inStringArray)
 	return result;
 }
 
-
 function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
+{
+	composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,function(inComposedLine){
+		placeStreamLine(inComposedLine.yOffset,inComposedLine.items,inPDFPage,inPDFWriter,inRenderingState);
+	});
+	
+}
+
+function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inLinePlacementMethod)
 {
 	// it is possible to define a stream item with no height, that
 	// simply wraps the text according to width till the stream is ended.
 	// it is possible to define also height, and then the stream will stop placement when 
 	// height is consumed.
-	// if height is provided than placement is from bottom+height going down. otherwise it is from bottom
-	// (where bottom would serve as top fo the stream)
+	// if height is provided than placement is from bottom+height going down, or bottom.top, if defined. otherwise it is from bottom
+	// (where bottom would serve as top for the stream) or top, if defiend
 	var xOffset = inBox.left;
 	var directionIsRTL = inItem.direction == 'rtl';
+
+	if(inBox.top !== undefined && inBox.bottom == undefined)
+	{
+		if(typeof(inBox.top) == 'object')
+			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
+		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:0);
+	}
+	var originalTop = (inBox.top !== undefined ? inBox.top : (inBox.bottom + (inBox.height !== undefined ? inBox.height:0)));
 
 	var lineInComposition =  {
 		items:[],
 		width:0,
 		height:0,
-		yOffset:inBox.bottom + (inBox.height !== undefined ? inBox.height:0),
+		yOffset:originalTop,
 		firstLine:true,
 		leading:inItem.leading ? inItem.leading:1.2,
 		reset:function()
@@ -288,7 +342,10 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		placeLine:function()
 		{
 			this.yOffset -= this.lineSpacing();
-			placeStreamLine(this.yOffset,this.items,inPDFPage,inPDFWriter,inRenderingState);
+			inLinePlacementMethod(this);
+			// save lower composition position for later composition queries
+			inItem.lowestContentOffset = this.yOffset;
+			inItem.contentHeight = originalTop - inItem.lowestContentOffset;
 			this.reset();
 		}
 	};
@@ -300,7 +357,7 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		if(lineInComposition.items.length == 0 && itemsInBox[i].isSpaces)
 			continue;
 
-		var itemMeasures = getItemMeasures(itemsInBox[i],inPDFWriter,inRenderingState);
+		var itemMeasures = getStreamContentItemMeasures(itemsInBox[i],inPDFWriter,inRenderingState);
 
 		if(itemsInBox[i].isNewLine)
 		{
@@ -360,8 +417,206 @@ function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		lineInComposition.placeLine();
 }
 
+function computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState)
+{
+	/* 
+		compute box top according to another box bottom, and an optional offset. this method
+		of placement is used when looking to place "rows" of items one below the other, and not necesserily knowing
+		where the items may be posited horizontal-wise. especially important when streams are placed, which have different
+		content height per the composition
+	*/
 
-function getItemMeasures(inItem,inPDFWriter,inRenderingState)
+	var theAnchoredBox = (typeof(inBox.top.box) == 'object') ? inBox.top.box : getBoxByID(inBox.top.box,inRenderingState);
+
+	inBox.top = getBoxBottom(theAnchoredBox,inPDFWriter,inRenderingState) + (inBox.top.offset ? inBox.top.offset:0);
+}
+
+function getBoxByID(inBoxID,inRenderingState)
+{
+	if(inRenderingState.boxIDToBox[inBoxID])
+		return inRenderingState.boxIDToBox[inBoxID];
+
+	// if mapping exists due to natural order of rendering, good. if not, loop now all boxes
+	calculateBoxIDsToBoxes(inRenderingState);
+	return inRenderingState.boxIDToBox[inBoxID];
+}
+
+function calculateBoxIDsToBoxes(inRenderingState)
+{
+	inRenderingState.theDocument.pages.forEach(function(inPage)
+	{
+		if(inPage.boxes)
+		{
+			inPage.boxes.forEach(function(inBox)
+			{
+				if(inBox.id)
+					inRenderingState.boxIDToBox[inBox.id] = inBox;
+			});
+		}
+	});
+}
+
+function getBoxBottom(inBox,inPDFWriter,inRenderingState)
+{
+	// if bottom exists, return it, unless it's a "bottom" that's
+	// actually top, which is the case for a box that contains a stream
+	// and does not have height defined
+	if(inBox.bottom !== undefined && !(inBox.height === undefined && doesBoxHaveStream(inBox)))
+		return inBox.bottom;
+
+	// bottom does not exist, need to calculate per top, or per the case of heightless box that contains stream
+	if(inBox.top !== undefined)
+	{
+		if(typeof(inBox.top) == 'object')
+			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
+	}
+
+	if(inBox.top !== undefined)
+	{
+		if(inBox.height !== undefined)
+		{
+			// case has top - simply substract
+			return inBox.top - inBox.height;
+		}
+		else
+		{
+			// only top, but no height. so calculate height per items and substract from top
+			return inBox.top - calculateBoxItemsHeight(inBox,inPDFWriter,inRenderingState);
+		}
+	}
+	else if(inBox.bottom !== undefined && inBox.height === undefined)
+	{
+		// case has bottom but no height - which necesserily means that there's a stream object here per the test at the top
+		// calculate height from items and remove from bottom (which is actually top)
+		return inBox.bottom - calculateBoxItemsHeight(inBox,inPDFWriter,inRenderingState);
+	}
+	else
+		return 0; // no top, no bottom...shouldn't happen
+}
+
+function doesBoxHaveStream(inBox)
+{
+	if(inBox.items)
+	{
+		var i = 0;
+		for(;i<inBox.items.length;++i)
+			if(inBox.items[i].type == 'stream')
+				break;
+		return i<inBox.items.length;
+	}
+	else 
+		return inBox.stream;
+}
+
+function calculateBoxItemsHeight(inBox,inPDFWriter,inRenderingState)
+{
+	if(inBox.items)
+	{
+		var maxHeight = 0;
+		inBox.items.forEach(function(inItem)
+		{
+			maxHeight = Math.max(getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState).height,maxHeight);
+		});
+		return maxHeight;
+	}
+	else if(inBox.image)
+		return getImageItemMeasures(inBox.image,inPDFWriter,inRenderingState,inBox).height;
+	else if(inBox.shape)
+		return getShapeItemMeasures(inBox.shape,inPDFWriter,inRenderingState).height;
+	else if(inBox.text)
+		return getTextItemMeasures(inBox.text,inPDFWriter,inRenderingState).height;
+	else if(inBox.stream)
+		return getComosedStreamMeasures(inBox,inBox.stream,inPDFWriter,inRenderingState).height;
+}
+
+function getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState)
+{
+	var result;
+
+	switch(inItem.type)
+	{
+		case 'image': 
+			result = getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox);
+			break;
+		case 'shape':
+			result = getShapeItemMeasures(inItem,inPDFWriter,inRenderingState);
+			break;
+		case 'text':
+			result = getTextItemMeasures(inItem,inPDFWriter,inRenderingState);
+			break;
+		case 'stream':
+			result = getComosedStreamMeasures(inBox,inItem,inPDFWriter,inRenderingState);
+			break;
+	}
+
+	return result;
+}
+
+function getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox)
+{
+	var result;
+	
+	if(inItem.transformation)
+	{
+		if(isArray(inItem.transformation))
+		{
+			var imageDimensions = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem));
+			var bbox = [0,0,imageDimensions.width,imageDimensions.height];
+			var transformedBox = transformBox(bbox,inItem.transformation);
+			result = {width:transformedBox[2],height:transformedBox[3]};
+		}
+		else
+			result = {width:inItem.transformation.width == undefined ? inBox.width : inItem.transformation.width,
+						height:inItem.transformation.height == undefined ? inBox.height : inItem.transformation.height};
+	}
+	else
+		result = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem)); 
+
+	return result;
+}
+
+function getShapeItemMeasures(inItem)
+{
+	var result;
+
+	switch(inItem.method)
+	{
+		case 'rectangle':
+			result = {width:inItem.width,height:inItem.height};
+		case 'square':
+			result = {width:inItem.width,height:inItem.width};
+			break;
+		case 'circle':
+			result = {width:inItem.radius*2,height:inItem.radius*2};
+			break;
+		case 'path':
+			var maxTop=0,
+				maxRight=0;
+			for(var i=0;i<inItem.points.length;i+=2)
+			{
+				if(inItem.points[i]> maxRight)
+					maxRight = inItem.points[i];
+				if(inItem.points[i+1]>maxTop)
+					maxTop = inItem.points[i+1];
+			}
+			result = {width:maxRight,height:maxTop};
+			break;
+		default:
+			result = {width:0,height:0};
+	}	
+	return result;				
+}
+
+function getComosedStreamMeasures(inBox,inItem,inPDFWriter,inRenderingState)
+{	
+	// composition saves the lowest line positioning in lowestContentOffset. if not done yet, compose on empty and save now.
+	if(inItem.lowestContentOffset == undefined)
+		composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,function(){});
+
+	return {bottom:inItem.lowestContentOffset,height:inItem.contentHeight};
+}
+
+function getStreamContentItemMeasures(inItem,inPDFWriter,inRenderingState)
 {
 	if(inItem.item.width && inItem.item.height)
 	{
@@ -373,46 +628,10 @@ function getItemMeasures(inItem,inPDFWriter,inRenderingState)
 	switch(inItem.item.type)
 	{
 		case 'image': 
-			if(inItem.item.transformation)
-			{
-				if(isArray(inItem.item.transformation))
-				{
-					var imageDimensions = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem.item));
-					var bbox = [0,0,imageDimensions.width,imageDimensions.height];
-					var transformedBox = transformBox(bbox,inItem.item.transformation);
-					result = {width:transformedBox[2],height:transformedBox[3]};
-				}
-				else
-					result = {width:inItem.item.transformation.width,
-								height:inItem.item.transformation.height};
-			}
-			else
-				result = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem.item)); 
+			result = getImageItemMeasures(inItem.item,inPDFWriter,inRenderingState);
 			break;
 		case 'shape':
-			switch(inItem.item.method)
-			{
-				// rectangle is taken care off earlier
-				case 'square':
-					result = {width:inItem.item.width,height:inItem.item.width};
-					break;
-				case 'circle':
-					result = {width:inItem.item.radius*2,height:inItem.item.radius*2};
-					break;
-				case 'path':
-					var maxTop=0,
-						maxRight=0;
-					for(var i=0;i<inItem.item.points.length;i+=2)
-					{
-						if(inItem.item.points[i]> maxRight)
-							maxRight = inItem.item.points[i];
-						if(inItem.item.points[i+1]>maxTop)
-							maxTop = inItem.item.points[i+1];
-					}
-					break;
-				default:
-					result = {width:0,height:0};
-			}				
+			result = getShapeItemMeasures(inItem.item);
 			break;
 		case 'text':
 			var theFont = getFont(inPDFWriter,inRenderingState,inItem.item);
@@ -500,6 +719,8 @@ function transformVector(inVector,inMatrix)
     return [inMatrix[0]*inVector[0] + inMatrix[2]*inVector[1] + inMatrix[4],
     		inMatrix[1]*inVector[0] + inMatrix[3]*inVector[1] + inMatrix[5]];
 }
+
+
 
 function expendItemsForStreamPlacement(inItems)
 {
