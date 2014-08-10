@@ -124,6 +124,7 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 	// render pages
 	inDocument.pages.forEach(function(inPage)
 	{
+		inRenderingState.links = [];
 		// accumulate required properties [syntax test]
 		width = inPage.width || width;
 		height = inPage.height || height;
@@ -135,6 +136,15 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 			inPage.boxes.forEach(function(inBox)
 			{
 				renderBox(inBox,pdfPage,inPDFWriter,inRenderingState);
+			});
+		}
+
+		if(inRenderingState.links.length > 0)
+		{
+			inPDFWriter.pausePageContentContext(inPDFWriter.startPageContentContext(pdfPage));
+			inRenderingState.links.forEach(function(link)
+			{
+				inPDFWriter.attachURLLinktoCurrentPage(link.link,link.rect[0],link.rect[1],link.rect[2],link.rect[3]);
 			});
 		}
 		
@@ -166,6 +176,7 @@ function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 		renderStreamItem(inBox,inBox.stream,inPDFPage,inPDFWriter,inRenderingState);
 
 }
+
 
 function renderItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
@@ -205,14 +216,36 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		opts.transformation.height = inBox.height;
 	}
 
+	var imageItemMeasures = getImageItemMeasures(inItem,inPDFWriter,inRenderingState);
+
 	if(inBox.top !== undefined && inBox.bottom == undefined)
 	{
 		if(typeof(inBox.top) == 'object')
 			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
-		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getImageItemMeasures(inItem,inPDFWriter,inRenderingState).height);
+		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:imageItemMeasures.height);
 	}
 
-	inPDFWriter.startPageContentContext(inPDFPage).drawImage(inBox.left,inBox.bottom,inRenderingState.getImageItemFilePath(inItem),opts);
+	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
+	inPDFWriter.startPageContentContext(inPDFPage).drawImage(left,inBox.bottom,inRenderingState.getImageItemFilePath(inItem),opts);	
+
+	if(inItem.link)
+		inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
+
+}
+
+function getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState)
+{
+	if(!inBox.alignment || inBox.alginment == "left")
+		return inBox.left;
+	else if(inBox.alignment == "right")
+	{
+		return inBox.left + inBox.width - getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState).width;
+	}
+	else
+	{
+		// center
+		return inBox.left + (inBox.width - getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState).width)/2;
+	}
 }
 
 function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
@@ -225,24 +258,26 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getShapeItemMeasures(inItem).height);
 	}
 
+	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
+
 	switch(inItem.method)
 	{
 		case 'rectangle':
-			inPDFWriter.startPageContentContext(inPDFPage).drawRectangle(inBox.left,inBox.bottom,inItem.width,inItem.height,inItem.options);
+			inPDFWriter.startPageContentContext(inPDFPage).drawRectangle(left,inBox.bottom,inItem.width,inItem.height,inItem.options);
 			break;
 		case 'square':
-			inPDFWriter.startPageContentContext(inPDFPage).drawSquare(inBox.left,inBox.bottom,inItem.width,inItem.options);
+			inPDFWriter.startPageContentContext(inPDFPage).drawSquare(left,inBox.bottom,inItem.width,inItem.options);
 			break;
 		case 'circle':
 			// translate bottom/left to center
-			inPDFWriter.startPageContentContext(inPDFPage).drawCircle(inBox.left+inItem.radius,inBox.bottom+inItem.radius,inItem.radius,inItem.options);
+			inPDFWriter.startPageContentContext(inPDFPage).drawCircle(left+inItem.radius,inBox.bottom+inItem.radius,inItem.radius,inItem.options);
 			break;
 		case 'path':
 			// translate bottom left to paths points
 			var args = inItem.points.slice();
 			for(var i=0;i<args.length;i+=2)
 			{
-				args[i]+=inBox.left;
+				args[i]+=left;
 				args[i+1]+=inBox.bottom;
 			}
 			if(inItem.options)
@@ -257,9 +292,7 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	inItem.options.font = getFont(inPDFWriter,inRenderingState,inItem);
 
-	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
-	if(inItem.direction == 'rtl')
-		theText = esrever.reverse(theText); // need to reverse the text for PDF placement
+	var theText = computeTextForItem(inItem);
 
 	if(inBox.top !== undefined && inBox.bottom == undefined)
 	{
@@ -268,16 +301,35 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:getTextItemMeasures(inItem,inPDFWriter,inRenderingState).height);
 	}
 
+	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
 
+	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,left,inBox.bottom,inItem.options);
 
-	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,inBox.left,inBox.bottom,inItem.options);
+	if(inItem.link)
+	{
+		var measures =  getFont(inPDFWriter,inRenderingState,inItem).calculateTextDimensions(theText,inItem.options.size);
+		inRenderingState.links.push({link:inItem.link,rect:[left+measures.xMin,inBox.bottom+measures.yMin,left+measures.xMax,inBox.bottom+measures.yMax]});
+	}
+}
+
+function computeTextForItem(inItem)
+{
+	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
+	if(inItem.direction == 'rtl')
+		theText = esrever.reverse(theText); // need to reverse the text for PDF placement	
+	else if(inItem.direction != 'ltr')
+		theText = reverseRTLWords(theText);
+	return theText;
+}
+
+function reverseRTLWords(theText)
+{
+	return theText.replace(/[\u0590-\u05FF,\uFB1D-\uFB4F]+[\(,\),\s,\,,',;,:,-,",\u0590-\u05FF,\uFB1D-\uFB4F]*/g,function(inMatch){return esrever.reverse(inMatch)});
 }
 
 function getTextItemMeasures(inItem,inPDFWriter,inRenderingState)
 {
-	var theFont = getFont(inPDFWriter,inRenderingState,inItem);
-
-	var measures = theFont.calculateTextDimensions(theText,inItem.options.size);
+	var measures =  getFont(inPDFWriter,inRenderingState,inItem).calculateTextDimensions(computeTextForItem(inItem),inItem.options.size);
 	return {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
 }
 
@@ -414,7 +466,44 @@ function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inLinePlace
 
 	// if line is not empty, place it now
 	if(lineInComposition.items.length > 0)
+	{
+		// right before placing, apply alignment considerations
+		if(directionIsRTL)
+		{
+			var offset = 0;
+			// direction RTL defaults to right, so change only if alingment is center or left
+			if(inBox.alignemnt == 'center')
+				offset = (lineInComposition.width-inBox.width)/2;
+			else if(inBox.alignment == 'left')
+				offset = (lineInComposition.width-inBox.width);
+			if(offset != 0)
+			{
+				lineInComposition.items.forEach(function(item)
+				{
+					item.xPosition+=offset;
+				});
+			}
+		}
+		else
+		{
+			// not RTL defaults to left, so change only if alignmetn is center or right
+			var offset = 0;
+			// direction RTL defaults to right, so change only if alingment is center or left
+			if(inBox.alignemnt == 'center')
+				offset = (inBox.width-lineInComposition.width)/2;
+			else if(inBox.alignment == 'right')
+				offset = (inBox.width-lineInComposition.width)/2;
+			if(offset != 0)
+			{
+				lineInComposition.items.forEach(function(item)
+				{
+					item.xPosition+=offset;
+				});
+			}			
+		}
+
 		lineInComposition.placeLine();
+	}
 }
 
 function computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState)
@@ -532,8 +621,8 @@ function calculateBoxItemsHeight(inBox,inPDFWriter,inRenderingState)
 function getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState)
 {
 	var result;
-
-	switch(inItem.type)
+	var itemType = inItem.type ? inItem.type:getBoxItemType(inBox);
+	switch(itemType)
 	{
 		case 'image': 
 			result = getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox);
@@ -550,6 +639,18 @@ function getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState)
 	}
 
 	return result;
+}
+
+function getBoxItemType(inBox)
+{
+	if(inBox.text)
+		return 'text';
+	else if(inBox.shape)
+		return 'shape';
+	else if(inBox.image)
+		return 'image';
+	else
+		return 'stream';
 }
 
 function getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox)
@@ -583,6 +684,7 @@ function getShapeItemMeasures(inItem)
 	{
 		case 'rectangle':
 			result = {width:inItem.width,height:inItem.height};
+			break;
 		case 'square':
 			result = {width:inItem.width,height:inItem.width};
 			break;
