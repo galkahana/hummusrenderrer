@@ -14,17 +14,24 @@ module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 	downloadExternals(inDocument.externals,function(inDownloadMap)
 		{
 			state.externalsLocalFiles = inDownloadMap;
-			var writer = hummus.createWriter(inTargetStream,inOptions);
+			try
+			{
+				var writer = hummus.createWriter(inTargetStream,inOptions);
 
-			renderDocument(inDocument,writer,state);
+				renderDocument(inDocument,writer,state);
 
-			writer.end();			
+				writer.end();			
 
-			if(inOptions.cleanExternals)
-				cleanExternals(state.externalsLocalFiles)
+				if(inOptions.cleanExternals)
+					cleanExternals(state.externalsLocalFiles)
 
-			if(inCallback)
-				inCallback(state);
+				if(inCallback)
+					inCallback(state);
+			}
+			catch(err)
+			{
+				inCallback(state,err);
+			}
 		});
 
 }
