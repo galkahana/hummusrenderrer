@@ -154,9 +154,6 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 
 function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 {
-	// collect box ID
-	if(inBox.id)
-		inRenderingState.boxIDToBox[inBox.id] = inBox;
 
 	// render the box
 	if(inBox.items)
@@ -175,6 +172,10 @@ function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 	else if(inBox.stream)
 		renderStreamItem(inBox,inBox.stream,inPDFPage,inPDFWriter,inRenderingState);
 
+	// collect box ID. collecting it after to allow reference in repeaters
+	// [meaning, allow a later ID to override this ID]
+	if(inBox.id)
+		inRenderingState.boxIDToBox[inBox.id] = inBox;
 }
 
 
@@ -226,7 +227,9 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	}
 
 	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
-	inPDFWriter.startPageContentContext(inPDFPage).drawImage(left,inBox.bottom,inRenderingState.getImageItemFilePath(inItem),opts);	
+	var imagePath = inRenderingState.getImageItemFilePath(inItem);
+	if(imagePath)
+		inPDFWriter.startPageContentContext(inPDFPage).drawImage(left,inBox.bottom,imagePath,opts);	
 
 	if(inItem.link)
 		inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
@@ -290,7 +293,10 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 
 function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
-	inItem.options.font = getFont(inPDFWriter,inRenderingState,inItem);
+	var theFont =  getFont(inPDFWriter,inRenderingState,inItem);
+	if(!theFont)
+			return;
+	inItem.options.font = theFont;
 
 	var theText = computeTextForItem(inItem);
 
@@ -307,7 +313,7 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 
 	if(inItem.link)
 	{
-		var measures =  getFont(inPDFWriter,inRenderingState,inItem).calculateTextDimensions(theText,inItem.options.size);
+		var measures = theFont.calculateTextDimensions(theText,inItem.options.size);
 		inRenderingState.links.push({link:inItem.link,rect:[left+measures.xMin,inBox.bottom+measures.yMin,left+measures.xMax,inBox.bottom+measures.yMax]});
 	}
 }
@@ -324,13 +330,21 @@ function computeTextForItem(inItem)
 
 function reverseRTLWords(theText)
 {
-	return theText.replace(/[\u0590-\u05FF,\uFB1D-\uFB4F]+[\(,\),\s,\,,',;,:,-,",\u0590-\u05FF,\uFB1D-\uFB4F]*/g,function(inMatch){return esrever.reverse(inMatch)});
+	return theText.replace(/[\(,\),\s,\,,',;,:,-,",]?[\u0590-\u05FF,\uFB1D-\uFB4F]+[\(,\),\s,\,,',;,:,-,",\u0590-\u05FF,\uFB1D-\uFB4F]*/g,function(inMatch){return esrever.reverse(inMatch)});
 }
 
 function getTextItemMeasures(inItem,inPDFWriter,inRenderingState)
 {
-	var measures =  getFont(inPDFWriter,inRenderingState,inItem).calculateTextDimensions(computeTextForItem(inItem),inItem.options.size);
-	return {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
+	var theFont = getFont(inPDFWriter,inRenderingState,inItem);
+	if(theFont)
+	{
+		var measures =  theFont.calculateTextDimensions(computeTextForItem(inItem),inItem.options.size);
+		return {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
+	}
+	else
+	{
+		return {width:0,height:0};
+	}
 }
 
 function joinTextArray(inStringArray)
@@ -656,22 +670,30 @@ function getBoxItemType(inBox)
 function getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox)
 {
 	var result;
+	var imagePath = inRenderingState.getImageItemFilePath(inItem);
 	
 	if(inItem.transformation)
 	{
 		if(isArray(inItem.transformation))
 		{
-			var imageDimensions = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem));
-			var bbox = [0,0,imageDimensions.width,imageDimensions.height];
-			var transformedBox = transformBox(bbox,inItem.transformation);
-			result = {width:transformedBox[2],height:transformedBox[3]};
+			if(imagePath)
+			{
+				var imageDimensions = inPDFWriter.getImageDimensions(imagePath);
+				var bbox = [0,0,imageDimensions.width,imageDimensions.height];
+				var transformedBox = transformBox(bbox,inItem.transformation);
+				result = {width:transformedBox[2],height:transformedBox[3]};
+			}
+			else
+				result = {width:0,height:0};
 		}
 		else
 			result = {width:inItem.transformation.width == undefined ? inBox.width : inItem.transformation.width,
 						height:inItem.transformation.height == undefined ? inBox.height : inItem.transformation.height};
 	}
-	else
+	else if(imagePath)
 		result = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem)); 
+	else
+		result = {width:0,height:0}; 
 
 	return result;
 }
@@ -737,26 +759,31 @@ function getStreamContentItemMeasures(inItem,inPDFWriter,inRenderingState)
 			break;
 		case 'text':
 			var theFont = getFont(inPDFWriter,inRenderingState,inItem.item);
-			// got some bug with spaces that does not allow proper measurements
-			if(inItem.isSpaces)
+			if(theFont)
 			{
-				var measures = theFont.calculateTextDimensions('a'+inItem.item.text+'a',inItem.item.options.size);
-				var measuresA = theFont.calculateTextDimensions('aa',inItem.item.options.size);
-				result = {width:measures.width-measuresA.width,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
-			}
-			else if(inItem.isNewLine)
-			{
-				result = {width:0,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
+				// got some bug with spaces that does not allow proper measurements
+				if(inItem.isSpaces)
+				{
+					var measures = theFont.calculateTextDimensions('a'+inItem.item.text+'a',inItem.item.options.size);
+					var measuresA = theFont.calculateTextDimensions('aa',inItem.item.options.size);
+					result = {width:measures.width-measuresA.width,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
+				}
+				else if(inItem.isNewLine)
+				{
+					result = {width:0,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
+				}
+				else
+				{
+					var theText = inItem.item.text;
+					if(inItem.item.direction == 'rtl')
+						theText = esrever.reverse(theText); // need to reverse the text for PDF placement
+
+					var measures = theFont.calculateTextDimensions(theText,inItem.item.options.size);
+					result = {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
+				}
 			}
 			else
-			{
-				var theText = inItem.item.text;
-				if(inItem.item.direction == 'rtl')
-					theText = esrever.reverse(theText); // need to reverse the text for PDF placement
-
-				var measures = theFont.calculateTextDimensions(theText,inItem.item.options.size);
-				result = {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
-			}
+				result = {width:0,height:0};
 			break;
 		default:
 			result = {width:0,height:0};
