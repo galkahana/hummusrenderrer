@@ -2,7 +2,7 @@ var hummus = require('hummus'),
 	tmp = require('temporary'),
 	http = require('http'),
 	https = require('https'),
-	esrever = require('esrever'),
+	bidi = require('icu-bidi'),
 	fs = require('fs');
 
 
@@ -328,16 +328,10 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 function computeTextForItem(inItem)
 {
 	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
-	if(inItem.direction == 'rtl')
-		theText = esrever.reverse(theText); // need to reverse the text for PDF placement	
-	else if(inItem.direction != 'ltr')
-		theText = reverseRTLWords(theText);
-	return theText;
-}
 
-function reverseRTLWords(theText)
-{
-	return theText.replace(/[\(,\),\s,\,,',;,:,-,",]?[\u0590-\u05FF,\uFB1D-\uFB4F]+[\(,\),\s,\,,',;,:,-,",\u0590-\u05FF,\uFB1D-\uFB4F]*/g,function(inMatch){return esrever.reverse(inMatch)});
+	var p = bidi.Paragraph(theText,{paraLevel: inItem.direction == 'rtl' ? bidi.DEFAULT_RTL:bidi.DEFAULT_LTR});
+
+	return p.writeReordered(bidi.Reordered.KEEP_BASE_COMBINING);
 }
 
 function getTextItemMeasures(inItem,inPDFWriter,inRenderingState)
@@ -363,44 +357,54 @@ function joinTextArray(inStringArray)
 	return result;
 }
 
-function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
+function calculateBoxTopAndBottomForStream(inBox,inPDFWriter,inRenderingState)
 {
-	composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,function(inComposedLine){
-		placeStreamLine(inComposedLine.yOffset,inComposedLine.items,inPDFPage,inPDFWriter,inRenderingState);
-	});
-	
-}
-
-function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inLinePlacementMethod)
-{
-	// it is possible to define a stream item with no height, that
-	// simply wraps the text according to width till the stream is ended.
-	// it is possible to define also height, and then the stream will stop placement when 
-	// height is consumed.
-	// if height is provided than placement is from bottom+height going down, or bottom.top, if defined. otherwise it is from bottom
-	// (where bottom would serve as top for the stream) or top, if defiend
-	var xOffset = inBox.left;
-	var directionIsRTL = inItem.direction == 'rtl';
-
 	if(inBox.top !== undefined && inBox.bottom == undefined)
 	{
 		if(typeof(inBox.top) == 'object')
 			computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState);
 		inBox.bottom = inBox.top - (inBox.height !== undefined ? inBox.height:0);
 	}
-	var originalTop = (inBox.top !== undefined ? inBox.top : (inBox.bottom + (inBox.height !== undefined ? inBox.height:0)));
+}
 
-	var lineInComposition =  {
+function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
+{
+	inRenderingState.pdfPage = inPDFPage;
+	composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,renderLine);
+}
+
+function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderLineMethod)
+{
+	calculateBoxTopAndBottomForStream(inBox,inPDFWriter,inRenderingState);
+
+	// transform the stream items to a structure that is defined by a plain text stream
+	// representing the stream text [non textual elements are represented by placeholder characters]
+	// and an accompanying array providing run data (which is essentially inItem.items with index pointers into the text
+	// stream array)
+	var logicalLines = createLogicalTextDataLines(inItem);
+
+	var top = (inBox.top !== undefined ? inBox.top : (inBox.bottom + (inBox.height !== undefined ? inBox.height:0)));
+	var left = inBox.left;
+
+	var lineCompositionState =  {
 		items:[],
-		width:0,
 		height:0,
-		yOffset:originalTop,
+		xOffset:left,
+		yOffset:top,
 		firstLine:true,
 		leading:inItem.leading ? inItem.leading:1.2,
+		box:inBox,
+		item:inItem,
+		pdfWriter:inPDFWriter,
+		pdfPage:inPDFPage,
+		renderingState:inRenderingState,
+		renderLine:inRenderLineMethod,
 		reset:function()
 		{
-			this.items = [];
-			this.width = 0;
+			this.yOffset -= this.lineSpacing();
+			inItem.lowestContentOffset = this.yOffset;
+			inItem.contentHeight = top - inItem.lowestContentOffset;			
+			this.xOffset = left;
 			this.height = 0;
 			this.firstLine = false;
 		},
@@ -411,120 +415,432 @@ function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inLinePlace
 		lineSpacing:function()
 		{
 			return this.height*this.lineSpacingModifier();
-		},
-		placeLine:function()
+		}
+		startLine:function(inDirection,inWidth)
 		{
-			this.yOffset -= this.lineSpacing();
-			inLinePlacementMethod(this);
-			// save lower composition position for later composition queries
-			inItem.lowestContentOffset = this.yOffset;
-			inItem.contentHeight = originalTop - inItem.lowestContentOffset;
-			this.reset();
+			// setup alignment. the direction determines
+			// the default if no alignment is defined
+			var alignment = inBox.alignment === undefined ? (inDirection == 'ltr' ? 'left':'right'):inBox.alignment;
+			if(alignment == 'center')
+				this.xOffset += (inBox.width - inWidth)/2;
+			else if(alignment == 'right')
+				this.xOffset += (inBox.width - inWidth);
 		}
 	};
 
-	var itemsInBox = expendItemsForStreamPlacement(inItem.items);
-
-	for(var i=0;i<itemsInBox.length;++i)
+	for(var i=0;i<logicalLines.length;++i)
 	{
-		if(lineInComposition.items.length == 0 && itemsInBox[i].isSpaces)
-			continue;
+		if(!composeLine(inLine,inBox,inItem,inPDFWriter,inRenderingState,lineCompositionState);
+			break; // will break on overflow
+	}
+}
 
-		var itemMeasures = getStreamContentItemMeasures(itemsInBox[i],inPDFWriter,inRenderingState);
+var kDefaultInlineObjectChar = '?';
 
-		if(itemsInBox[i].isNewLine)
+function createLogicalTextData(inItem)
+{
+	var logicalLines = [];
+	var currentText = '';
+	var currentStyles = [];
+	var currentTextLength = 0;
+
+	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
+
+	inItem.items.forEach(function(inItem)
+	{
+		if(inItem.type == 'text')
 		{
-			if(inBox.height !== undefined &&
-				lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom)
+			// texts may have line ends, analyse the text and finish line if necessary
+			var textComponents = theText.match(/[^\r\n]+|\r\n|\n|\r/g);
+			if(textComponents)
 			{
-				// newline overflow, break
-				break;
-			}
+				textComponents.forEach(function(inText)
+				{
+					if(inText.search(/\r|\n/) == -1)
+					{
+						// non line. append to current text line
+						currentText+=inText;
+						currentTextLength+=inText.length;
+						currentStyles.push({style:inItem,limit:currentTextLength});
+					}
+					else
+					{
+						// line, finalize current line and restart
+						if(currentStyles.length == 0)
+							currentStyles.push({style:inItem}); // for empty line make sure the maintain the style for the newline height to be calculated
+						logicalLines.push({text:currentText,styles:currentStyles});
+						currentText = '';
+						currentStyles = [];
+						currentTextLength = 0;
 
-			if(lineInComposition.items.length > 0)
+					}
+				}
+			}	
+		}
+		else
+		{
+			// non texts are simple "one character" objects
+			currentText+=kDefaultInlineObjectChar;
+			currentTextLength+=1;
+			currentStyles.push({style:inItem,limit:currentTextLength});
+		}
+	});
+
+	// close a final line if one exists
+	if(currentTextLength > 0)
+		logicalLines.push({text:currentText,styles:currentStyles});
+
+	return logicalLines;
+}
+
+function composeLine(inLine,inState)
+{
+	if(inLine.text.length > 0)
+	{
+		// compose line considering various items placement and direction
+		return renderParagraph(inLine,inState);
+	}
+	else
+	{
+		// empty line, just increase yOffset per the newline height.
+		var lineHeight = getFont(inPDFWriter,inRenderingState,inLine.styles[0]).calculateTextDimensions('d',inLine.styles[0].options.size).yMax;
+		if(inState.box.height !== undefined && inState.yOffset-lineHeight*inState.lineSpacingModifier() < inState.box.bottom)
+		{
+			return false;
+		}
+		else
+		{
+			inState.startLine(inState.item.direction,0);
+			inState.height = lineHeight;
+			inState.reset();	
+			return true;		
+		}
+	}
+}
+
+function renderParagraph(inLine,inState)
+{
+	var p = bidi.Paragraph(inLine.text,{paraLevel: inState.item.direction == 'rtl' ? bidi.DEFAULT_RTL:bidi.DEFAULT_LTR});
+	var textLength = inLine.text.length;
+
+	var paraLevel=1&p.getParaLevel();
+	var direction = paraLevel == bidi.DEFAULT_RTL ? 'rtl':'ltr';
+	var measures=getTextMeasures(inLine.text,inLine.styles,inState);
+
+	if(measures.width<=inState.box.width
+		&& (inState.box.height == undefined || (inState.yOffset-measures.height*inState.lineSpacingModifier() >= inState.box.bottom)))
+	{
+		// everything fits onto one line
+		// prepare rendering a new line from either left or right
+		inState.startLine(direction,width);
+		inState.renderLine(p,inLine.text,0,textLength, inLine.styles, 0,inLine.styles.length,inState);
+		inState.reset();
+		return true;
+	}
+	else
+	{
+		var start=0, 
+			styleRunStart = 0,
+			rw = {limit:null, styleRunLimit:null,width:null,verticalOverflow:false},
+			skipSpaces = false; // skip spaces is for line start. any spaces should be skipped after a line that got broken
+
+		for(;;)
+		{
+			rw.limit = textLength;
+			rw.styleRunLimit = inLine.styles.length;
+			if(skipSpaces) // only false in the first line
 			{
-				// place current line, and move on
-				lineInComposition.placeLine();
+				var nonSpaceIndex = inLine.text.substr(start).search(/[^\s]/);
+				if(nonSpaceIndex != -1)
+				{
+					start+= nonSpaceIndex;
+					if(start == textLength) // if the skipped spaces are the end of the text
+						break;
+				}
+			}
+			rw =  getLineBreak(inLine.text,start,rw.limit,p,inLine.styles,styleRunStart,rw.styleRunLimit,inState);
+
+			if(rw.verticalOverflow)
+				break;
+
+			var line = p.setLine(start,rw.limit);
+			// prepare rendering a new line
+			// from either left or right
+			inState.startLine(direction,rw.width);
+			inState.renderLine(line,inLine.text,start,rw.limit,inLine.styles,styleRunStart,rw.styleRunLimit-styleRunStart,inState);
+			inState.reset();
+			if(rw.limit == textLength)
+				break;
+			start = rw.limit;
+			styleRunStart=styleRunLimit-1;
+			if(start>=inLine.styles[styleRunStart].limit)
+				++styleRunStart;
+
+			if(!skipSpaces)
+				skipSpaces = true;
+		}
+		return rw.verticalOverflow;
+	}
+}
+
+function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState)
+{
+	var direction = inBidiLine.getDirection();
+	if(direction != 'mixed')
+	{
+		// unidirectional
+		if(inStyleRunsCount<=1)
+			renderRun(inText,inStart,inLimit,direction,inStylesRuns[inStyleRunsStart].style,inState);
+		else
+			renderDirectionalRun(inText,inStart,inLimit,direction,inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
+	}
+	else
+	{
+		// mixed-directional
+		var count,i;
+
+		count = inBidiLine.countRuns();
+		if(inStyleRunsCount<=1)
+		{
+			style = inStylesRuns[inStyleRunsStart].style;
+			// iterate over direcitonal runs
+			for(i=0;i<count;++i)
+			{
+				var visRun = inBidiLine.getVisualRun(i);
+				renderRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, style,inState);
+			}
+		}
+		else
+		{
+			for(i=0;i<count;++i)
+			{
+				var visRun = inBidiLine.getVisualRun(i);
+				renderDirectionalRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
+			}
+		}
+	}
+}
+
+function renderDirectionalRun(inText,inStart,inLimit,inDirection,inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState)
+{
+	var i;
+
+	if(inDirection == 'ltr')
+	{
+		var styleLimit;
+
+		for(i=0;i<inStyleRunsCount;++i)
+		{
+			styleLimit = inStyleRuns[inStyleRunsStart + i].limit;
+			if(inStart < styleLimit)
+			{
+				if(styleLimit>inLimit) { styleLimit=inLimit; }
+				renderRun(inText,inStart,styleLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
+				if(styleLimit==inLimit) { break; }
+				inStart=styleLimit;
+			}
+		}
+	}
+	else
+	{
+		var styleStart;
+
+		for(i=inStyleRunsCount-1;i>=0;--i)
+		{
+			if(i>0)
+				styleStart = inStyleRuns[inStyleRunsStart+i-1].limit;
+			else
+				styleStart = 0;
+
+			if(inLimit>=styleStart)
+			{
+				if(styleStart<inStart) {styleStart=start;}
+				renderRun(inText,styleStart,inLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
+				if(styleStart == start){break;}
+				inLimit = styleStart;
+			}
+		}
+	}
+
+}
+
+function renderRun(inText,inStart,inLimit,inDirection,inStyle,inState)
+{
+	var itemMeasures;
+	if(inStyle.type !== undefined)
+	{
+		// regular item, place using regular method, with a new box stating it's position
+		var theItem;
+		if(inStyle.type == 'text')
+		{
+			theItem = shallowCopy(inStyle);
+			theItem.text = inText;
+		}
+		else
+		{
+			theItem = inStyle;
+		}
+		theItem.direction = inDirection;
+		var theBox = {left:inState.xOffset,bottom:inState.yOffset,items:[theItem]};
+		renderItem(theBox,theItem,inState.renderingState.pdfPage,inState.pdfWriter,inState.renderingState);
+		itemMeasures = getItemMeasures(theItem,theBox,inState.pdfWriter,inState.renderingState);
+	}
+	else
+	{
+		// a box. create a copy of the box, and replace the xOffset and yOffset
+		// ponder:replacing. should i add? right now will not support non-0 coordinates
+		// of box...oh well...we still have to figure out what its good for anyways
+		var newBox = shallowCopy(inStyle);
+		newBox.left = inState.xOffset;
+		newBox.bottom = inState.yOffset;
+		renderBox(newBox,inState.renderingState.pdfPage,inState.pdfWriter,inState.renderingState);
+		itemMeasures = calculateBoxMeasures(newBox,inState.pdfWriter,inState.renderingState);
+	}	
+
+	inState.xOffset += itemMeasures.width;
+	inState.height = Math.max(inState.height,itemMeasures.width);
+}
+
+function getLineBreak(inText,inStart,inLimit,inBidi,inStyles,inStylesStart,inStylesLimit,inState)
+{
+	// getlinebreak will find a line break for content so that it can be placed in a line so that it
+	// fits the box width/height.
+	// get line break assumes that it is placed in a constant width box.
+	// therefore if it can't place anything in the line, this will mark a necessary vertical overflow.
+
+	var maxWidth = inState.box.width;
+	var result = {width:0;limit:inStart,stylesLimit:inStylesStart};
+	
+	// empty case
+	if(inLimit == inStart)
+		return result;
+
+	// advance styles start to an affective range
+	while(inStyles[result.stylesLimit].limit < inStart)
+		++reslt.stylesLimit;
+
+	for(;;)
+	{
+		// advance by logicalRun and style run, adding to width
+		var logicalRun = inBidi.getLogicalRun(result.limit);
+
+		if(logicalRun.limit > inLimit) 
+			logicalRun.limit = inLimit;
+
+		// for each style in logical run. measure as style in full
+		// if good - go on [advance limit and style limit]. if not, need to break. 
+		while(result.stylesLimit<1 || inStyles[result.stylesLimit-1].limit<= logicalRun.limit)
+		{
+			// get the width of the range result.limit...Math.min(result.stylesLimit,logicalRun.limit)
+			var runLimit = Math.min(inStyles[result.stylesLimit].limit,logicalRun.limit);
+			var runMeasures = getRunMeasures(inText,result.limit,runLimit,logicalRun.dir,inStyles[result.stylesLimit].style,inState);
+			if((result.width + runMeasures.width <=maxWidth) &&
+				(inState.box.height == undefined || (inState.yOffset-runMeasures.height*inState.lineSpacingModifier() >= inState.box.bottom)))
+			{
+				// add run/logical run in full
+				result.limit = runLimit;
+				if(runLimit == inStyles[reusult.stylesLimit].limit)
+					++result.stylesLimit;
+				result.width+=runMeasures.width;
 			}
 			else
 			{
-				// empty line, just increase yOffset per the newline height. no need
-				lineInComposition.Offset -= itemMeasures.height*lineInComposition.lineSpacingModifier();
-				lineInComposition.reset();
-			}
-		}
-		else
-		{
-			// check for overflow if will place the element
-			if(lineInComposition.width + itemMeasures.width > inBox.width ||
-				(inBox.height !== undefined &&
-					lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom))
-			{
-				lineInComposition.placeLine();
-
-				// skip if spaces
-				if(itemsInBox[i].isSpaces)
-					continue;
-
-			}
-
-
-			// check if element alone overflows, if so, quit
-			if(itemMeasures.width > inBox.width ||
-				(inBox.height !== undefined &&
-					lineInComposition.yOffset - itemMeasures.height*lineInComposition.lineSpacingModifier() < inBox.bottom))
-			{
+				// got a break, break according to spaces, and finish
+				var textComponents = theText.substring(result.limit,runLimit).match(/[^\s]+|[^\S]+/g);
+				for(var i=0;i<textComponents.length;++i)
+				{
+					runMeasures = getRunMeasures(textComponents[i],0,textComponents[i].length,logicalRun.dir,inStyles[result.stylesLimit].style,inState);
+					if((result.width + runMeasures.width <=maxWidth) &&
+						(inState.box.height == undefined || (inState.yOffset-runMeasures.height*inState.lineSpacingModifier() >= inState.box.bottom)))	
+					{
+						// add word/spaces in
+						result.limit+=textComponents[i].length;
+						result.width+=runMeasures.width;
+					}
+					else
+						break;
+				}
+				// advance style in 1 to get to the limit
+				++result.stylesLimit;				
+				// force finish
+				logicalRun.limit = inLimit;
 				break;
-			}		
-
-			// items is OK for placement in line, so do so, and update its state
-			itemsInBox[i].xPosition = directionIsRTL ? (xOffset + inBox.width - lineInComposition.width - itemMeasures.width): (xOffset+lineInComposition.width);
-			lineInComposition.items.push(itemsInBox[i]);
-			lineInComposition.width+=itemMeasures.width;
-			lineInComposition.height = Math.max(lineInComposition.height,lineInComposition.firstLine || itemsInBox[i].item.type != 'text' ? itemMeasures.height:itemsInBox[i].item.options.size);
+			}
 		}
+
+		if(logicalRun.limit == inLimit) // ended text, break
+			break;
 	}
 
-	// if line is not empty, place it now
-	if(lineInComposition.items.length > 0)
+	result.verticalOverflow = (inStart == result.limit);
+
+	return result;
+}
+
+function getRunMeasures(inText,inStart,inLimit,inDirection,inStyle,inState)
+{
+	var itemMeasures;
+	if(inStyle.type !== undefined)
 	{
-		// right before placing, apply alignment considerations
-		if(directionIsRTL)
+		// regular item, place using regular method, with a new box stating it's position
+		var theItem;
+		if(inStyle.type == 'text')
 		{
-			var offset = 0;
-			// direction RTL defaults to right, so change only if alingment is center or left
-			if(inBox.alignemnt == 'center')
-				offset = (lineInComposition.width-inBox.width)/2;
-			else if(inBox.alignment == 'left')
-				offset = (lineInComposition.width-inBox.width);
-			if(offset != 0)
-			{
-				lineInComposition.items.forEach(function(item)
-				{
-					item.xPosition+=offset;
-				});
-			}
+			theItem = shallowCopy(inStyle);
+			theItem.text = inText.substring(inStart,inLimit);
 		}
 		else
 		{
-			// not RTL defaults to left, so change only if alignmetn is center or right
-			var offset = 0;
-			// direction RTL defaults to right, so change only if alingment is center or left
-			if(inBox.alignemnt == 'center')
-				offset = (inBox.width-lineInComposition.width)/2;
-			else if(inBox.alignment == 'right')
-				offset = (inBox.width-lineInComposition.width)/2;
-			if(offset != 0)
-			{
-				lineInComposition.items.forEach(function(item)
-				{
-					item.xPosition+=offset;
-				});
-			}			
+			theItem = inStyle;
 		}
-
-		lineInComposition.placeLine();
+		theItem.direction = inDirection;
+		var theBox = {left:0,bottom:0,items:[theItem]};
+		itemMeasures = getItemMeasures(theItem,theBox,inState.pdfWriter,inState.renderingState);
 	}
+	else
+	{
+		// a box. create a copy of the box, and replace the xOffset and yOffset
+		// ponder:replacing. should i add? right now will not support non-0 coordinates
+		// of box...oh well...we still have to figure out what its good for anyways
+		var newBox = shallowCopy(inStyle);
+		newBox.left = inState.xOffset;
+		newBox.bottom = inState.yOffset;
+		itemMeasures = calculateBoxMeasures(newBox,inState.pdfWriter,inState.renderingState);
+	}	
+	return itemMeasures;
+}
+
+function getTextMeasures(inText, inStyles,inState)
+{
+	// pretty much follows the line break algorithm, with less restraints
+
+	var p = bidi.Paragraph(inText,bidi.DEFAULT_LTR);
+
+	// total text width. loop through logical runs
+	var width=0,limit=0,stylesLimit=0,height =0;
+
+	while(limit<inText.length)
+	{
+		// advance by logicalRun and style run, adding to width
+		var logicalRun = p.getLogicalRun(limit);
+
+		// for each style in logical run. measure as style in full
+		// if good - go on [advance limit and style limit]. if not, need to break. 
+		while(stylesLimit<1 || inStyles[stylesLimit-1].limit<= logicalRun.limit)
+		{
+			// get the width of the range result.limit...Math.min(result.stylesLimit,logicalRun.limit)
+			var runLimit = Math.min(inStyles[stylesLimit].limit,logicalRun.limit);
+			var runMeasures = getRunMeasures(inText,limit,runLimit,logicalRun.dir,inStyles[stylesLimit].style,inState);
+			// add run in full
+			if(runLimit == inStyles[stylesLimit].limit)
+				++stylesLimit;
+			width+=runMeasures.width;
+			height = Math.max(height,runMeasures.height);
+		}
+		limit = logicalRun.limit;
+	}
+
+	return {width:width,height:height};	
 }
 
 function computeBoxTopFromAnchor(inBox,inPDFWriter,inRenderingState)
@@ -620,23 +936,41 @@ function doesBoxHaveStream(inBox)
 
 function calculateBoxItemsHeight(inBox,inPDFWriter,inRenderingState)
 {
-	if(inBox.items)
+	return calculateBoxMeasures(inBox,inPDFWriter,inRenderingState).height;
+}
+
+function calculateBoxMeasures(inBox,inPDFWriter,inRenderingState)
+{
+	if(inBox.height !== undefined && inBox.width !== undefined)
+		return {width:inBox.width,height:inBox.height};
+	else
 	{
-		var maxHeight = 0;
-		inBox.items.forEach(function(inItem)
+		var itemsMeasures;
+
+		if(inBox.items)
 		{
-			maxHeight = Math.max(getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState).height,maxHeight);
-		});
-		return maxHeight;
+			itemsMeasures = {width:0,height:0};
+			inBox.items.forEach(function(inItem)
+			{
+				var itemMeasures = getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState);
+				itemsMeasures.height = Math.max(itemMeasures.height,itemsMeasures.height);
+				itemsMeasures.width+=itemMeasures.width;
+
+			});
+
+		}
+		else if(inBox.image)
+			itemsMeasures =  getImageItemMeasures(inBox.image,inPDFWriter,inRenderingState,inBox);
+		else if(inBox.shape)
+		 	itemsMeasures = getShapeItemMeasures(inBox.shape,inPDFWriter,inRenderingState);
+		else if(inBox.text)
+			itemsMeasures = getTextItemMeasures(inBox.text,inPDFWriter,inRenderingState);
+		else if(inBox.stream)
+			itemsMeasures = getComosedStreamMeasures(inBox,inBox.stream,inPDFWriter,inRenderingState);
+
+		return {width:inBox.width === undefined ? itemsMeasures.width:inBox.width,
+				height:inBox.height === undefined ? itemsMeasures.height:inBox.height};
 	}
-	else if(inBox.image)
-		return getImageItemMeasures(inBox.image,inPDFWriter,inRenderingState,inBox).height;
-	else if(inBox.shape)
-		return getShapeItemMeasures(inBox.shape,inPDFWriter,inRenderingState).height;
-	else if(inBox.text)
-		return getTextItemMeasures(inBox.text,inPDFWriter,inRenderingState).height;
-	else if(inBox.stream)
-		return getComosedStreamMeasures(inBox,inBox.stream,inPDFWriter,inRenderingState).height;
 }
 
 function getItemMeasures(inItem,inBox,inPDFWriter,inRenderingState)
@@ -676,6 +1010,8 @@ function getBoxItemType(inBox)
 
 function getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox)
 {
+	// note that below, any derivation of the transformation width/height from the box width/height should have already happened
+
 	var result;
 	var imagePath = inRenderingState.getImageItemFilePath(inItem);
 	
@@ -694,8 +1030,8 @@ function getImageItemMeasures(inItem,inPDFWriter,inRenderingState,inBox)
 				result = {width:0,height:0};
 		}
 		else
-			result = {width:inItem.transformation.width == undefined ? inBox.width : inItem.transformation.width,
-						height:inItem.transformation.height == undefined ? inBox.height : inItem.transformation.height};
+			result = {width:inItem.transformation.width,
+						height:inItem.transformation.height};
 	}
 	else if(imagePath)
 		result = inPDFWriter.getImageDimensions(inRenderingState.getImageItemFilePath(inItem)); 
@@ -745,57 +1081,6 @@ function getComosedStreamMeasures(inBox,inItem,inPDFWriter,inRenderingState)
 		composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,function(){});
 
 	return {bottom:inItem.lowestContentOffset,height:inItem.contentHeight};
-}
-
-function getStreamContentItemMeasures(inItem,inPDFWriter,inRenderingState)
-{
-	if(inItem.item.width && inItem.item.height)
-	{
-		return {width:inItem.item.width,height:inItem.item.height};
-	}
-
-	var result;
-
-	switch(inItem.item.type)
-	{
-		case 'image': 
-			result = getImageItemMeasures(inItem.item,inPDFWriter,inRenderingState);
-			break;
-		case 'shape':
-			result = getShapeItemMeasures(inItem.item);
-			break;
-		case 'text':
-			var theFont = getFont(inPDFWriter,inRenderingState,inItem.item);
-			if(theFont)
-			{
-				// got some bug with spaces that does not allow proper measurements
-				if(inItem.isSpaces)
-				{
-					var measures = theFont.calculateTextDimensions('a'+inItem.item.text+'a',inItem.item.options.size);
-					var measuresA = theFont.calculateTextDimensions('aa',inItem.item.options.size);
-					result = {width:measures.width-measuresA.width,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
-				}
-				else if(inItem.isNewLine)
-				{
-					result = {width:0,height:theFont.calculateTextDimensions('d',inItem.item.options.size).yMax}; // height is ascent which is approximately the height of d
-				}
-				else
-				{
-					var theText = inItem.item.text;
-					if(inItem.item.direction == 'rtl')
-						theText = esrever.reverse(theText); // need to reverse the text for PDF placement
-
-					var measures = theFont.calculateTextDimensions(theText,inItem.item.options.size);
-					result = {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
-				}
-			}
-			else
-				result = {width:0,height:0};
-			break;
-		default:
-			result = {width:0,height:0};
-	}
-	return result;
 }
 
 function getFont(inPDFWriter,inRenderingState,inItem)
@@ -856,51 +1141,6 @@ function transformVector(inVector,inMatrix)
     		inMatrix[1]*inVector[0] + inMatrix[3]*inVector[1] + inMatrix[5]];
 }
 
-
-
-function expendItemsForStreamPlacement(inItems)
-{
-	var result = [];
-
-	/*
-		expanding mostly places the items in minimal containers
-		and expands text items to their worlds/spaces/newlines, for later
-		simplified placement
-	*/
-
-	inItems.forEach(function(inItem)
-	{
-		if(inItem.type == "text")
-		{
-			// split text to its components
-			var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
-
-			var textComponents = theText.match(/[^\s\r\n]+|[^\S\r\n]+|\r\n|\n|\r/g);
-			if(textComponents)
-			{
-				textComponents.forEach(function(inText)
-				{
-					var itemCopy = shallowCopy(inItem);
-					itemCopy.text = inText;
-					result.push(
-						{
-							item:itemCopy,
-							isSpaces:inText.search(/[^\S\r\n]/) != -1,
-							isNewLine:inText.search(/\r|\n/) != -1
-						});
-				});
-			}
-		}
-		else
-		{
-			result.push({item:inItem});
-		}
-	});
-
-
-	return result;
-}
-
 function shallowCopy(inItem)
 {
 	var newItem = {};
@@ -911,29 +1151,6 @@ function shallowCopy(inItem)
 	}
 	return newItem;
 }
-
-function placeStreamLine(inYOffset,inItems,inPDFPage,inPDFWriter,inRenderingState)
-{
-	inItems.forEach(function(inItem)
-	{
-		if(inItem.item.type)
-		{
-			// regular item, place using regular method, with a new box stating it's position
-			renderItem({left:inItem.xPosition,bottom:inYOffset},inItem.item,inPDFPage,inPDFWriter,inRenderingState);
-		}
-		else
-		{
-			// a box. create a copy of the box, and replace the xOffset and yOffset
-			// ponder:replacing. should i add? right now will not support non-0 coordinates
-			// of box...oh well...we still have to figure out what its good for anyways
-			var newBox = shallowCopy(inItem.item);
-			newBox.left = inItem.xOffset;
-			newBox.bottom = inYOffset;
-			renderBox(newBox,inPDFPage,inPDFWriter,inRenderingState);
-		}
-	});
-}
-
 
 function cleanExternals(externalMap)
 {
