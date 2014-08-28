@@ -30,7 +30,7 @@
 										"items": [
 											{
 												"type":"text",
-												"text":["so i\n was writing this text,"," and it had several items"],
+												"text":["so i\nwas writing this text,"," and it had several items"],
 												"options": {
 													"fontPath":"./arial.ttf",
 													"size":40,

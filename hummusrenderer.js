@@ -20,17 +20,18 @@ module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 
 				renderDocument(inDocument,writer,state);
 
-				writer.end();			
+				writer.end();	
 
+        		
 				if(inOptions.cleanExternals)
 					cleanExternals(state.externalsLocalFiles)
 
 				if(inCallback)
-					inCallback(state);
+					inCallback();
 			}
 			catch(err)
 			{
-				inCallback(state,err);
+				inCallback(err);
 			}
 		});
 
@@ -167,7 +168,7 @@ function renderBox(inBox,inPDFPage,inPDFWriter,inRenderingState)
 	{
 		inBox.items.forEach(function(inItem)
 		{
-			renderItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
+			renderItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState);
 		});
 	}
 	else if(inBox.image)
@@ -318,12 +319,38 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 
 	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,left,inBox.bottom,inItem.options);
 
+
 	if(inItem.link)
 	{
-		var measures = theFont.calculateTextDimensions(theText,inItem.options.size);
+		var measures = calculateTextDimensions(theFont,theText,inItem.options.size);
 		inRenderingState.links.push({link:inItem.link,rect:[left+measures.xMin,inBox.bottom+measures.yMin,left+measures.xMax,inBox.bottom+measures.yMax]});
 	}
 }
+
+function hasNonSpace(inText)
+{
+	return inText.match(/[^\s]/);
+}
+
+function calculateTextDimensions(inFont,inText,inFontSize)
+{
+	// calculate the text measures. handles a bug where space only strings don't get their correct measures
+	if(hasNonSpace(inText))
+	{
+		return inFont.calculateTextDimensions(inText,inFontSize);
+	}
+	else
+	{
+		var measures = inFont.calculateTextDimensions('a'+inText+'a',inFontSize);
+		var measuresA = inFont.calculateTextDimensions('aa',inFontSize);
+		var dMeasure = inFont.calculateTextDimensions('d',inFontSize);
+		dMeasure.width = measures.width-measuresA.width;
+		dMeasure.xMin = 0;
+		dMeasure.xMax = dMeasure.width;
+		return dMeasure;
+	}
+}
+		
 
 function computeTextForItem(inItem)
 {
@@ -337,10 +364,12 @@ function computeTextForItem(inItem)
 function getTextItemMeasures(inItem,inPDFWriter,inRenderingState)
 {
 	var theFont = getFont(inPDFWriter,inRenderingState,inItem);
-	if(theFont)
+	var theText = computeTextForItem(inItem);
+	if(theFont && theText.length > 0)
 	{
-		var measures =  theFont.calculateTextDimensions(computeTextForItem(inItem),inItem.options.size);
-		return {width:measures.width,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
+		var measures =  calculateTextDimensions(theFont,theText,inItem.options.size);
+		return {width:measures.xMax,height:measures.yMax}; // note, taking yMax, and not height, because we want the ascent and not the descent, which is below the baseline!
+															// also taking xMAx...cause i want the advance and not just the start to end glyphs area
 	}
 	else
 	{
@@ -370,12 +399,15 @@ function calculateBoxTopAndBottomForStream(inBox,inPDFWriter,inRenderingState)
 function renderStreamItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 {
 	inRenderingState.pdfPage = inPDFPage;
-	composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,renderLine);
+	composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,renderRun);
 }
 
-function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderLineMethod)
+function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderRunMethod)
 {
 	calculateBoxTopAndBottomForStream(inBox,inPDFWriter,inRenderingState);
+
+	var alignment = inBox.alignment === undefined ? (inItem.direction == 'rtl' ? 'right':'left'):inBox.alignment;
+
 
 	// transform the stream items to a structure that is defined by a plain text stream
 	// representing the stream text [non textual elements are represented by placeholder characters]
@@ -387,7 +419,6 @@ function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderLin
 	var left = inBox.left;
 
 	var lineCompositionState =  {
-		items:[],
 		height:0,
 		xOffset:left,
 		yOffset:top,
@@ -396,18 +427,8 @@ function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderLin
 		box:inBox,
 		item:inItem,
 		pdfWriter:inPDFWriter,
-		pdfPage:inPDFPage,
 		renderingState:inRenderingState,
-		renderLine:inRenderLineMethod,
-		reset:function()
-		{
-			this.yOffset -= this.lineSpacing();
-			inItem.lowestContentOffset = this.yOffset;
-			inItem.contentHeight = top - inItem.lowestContentOffset;			
-			this.xOffset = left;
-			this.height = 0;
-			this.firstLine = false;
-		},
+		renderRun:inRenderRunMethod,
 		lineSpacingModifier:function()
 		{
 			return this.firstLine?1:this.leading;
@@ -415,42 +436,65 @@ function composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,inRenderLin
 		lineSpacing:function()
 		{
 			return this.height*this.lineSpacingModifier();
-		}
-		startLine:function(inDirection,inWidth)
+		},
+		startLine:function(inDirection,inWidth,inHeight)
 		{
-			// setup alignment. the direction determines
+			// before a lign is rendered. when there's already knowledge
+			// of the line width. setup alignment. the direction determines
 			// the default if no alignment is defined
-			var alignment = inBox.alignment === undefined ? (inDirection == 'ltr' ? 'left':'right'):inBox.alignment;
 			if(alignment == 'center')
 				this.xOffset += (inBox.width - inWidth)/2;
 			else if(alignment == 'right')
 				this.xOffset += (inBox.width - inWidth);
+
+			// setup baseline for text placement
+			this.height = inHeight;
+			this.yOffset -= this.lineSpacing();
+			inItem.lowestContentOffset = this.yOffset;
+			inItem.contentHeight = top - inItem.lowestContentOffset;	
+		},
+		reset:function()
+		{
+			// ran after line is rendered and finished. prpare for next line
+			this.xOffset = left;
+			this.height = 0;
+			this.firstLine = false;
 		}
 	};
 
 	for(var i=0;i<logicalLines.length;++i)
 	{
-		if(!composeLine(inLine,inBox,inItem,inPDFWriter,inRenderingState,lineCompositionState);
+		// loop logical lines and place. lines may be broken further to allow for text wrap where required
+		if(!composeLine(logicalLines[i],lineCompositionState))
 			break; // will break on overflow
 	}
 }
 
 var kDefaultInlineObjectChar = '?';
 
-function createLogicalTextData(inItem)
+function createLogicalTextDataLines(inItem)
 {
 	var logicalLines = [];
 	var currentText = '';
 	var currentStyles = [];
 	var currentTextLength = 0;
 
-	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
+	// loop stream item creating an array of "logical lines"
+	// the lines are spearated by text items with newlines (\r or \n or \r\n)
+	// each line is made of a single string of text, where each character
+	// represents either a real text character or an inline object (e.g. an image)
+	// an additional array of "styles" has multiple objects, where each object 
+	// represents either a text style run or an inline object. the "style" propery
+	// will have the originla stream item. an additional "limit" property is an index that
+	// represents the first characters index after this run.
 
+	
 	inItem.items.forEach(function(inItem)
 	{
 		if(inItem.type == 'text')
 		{
 			// texts may have line ends, analyse the text and finish line if necessary
+			var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
 			var textComponents = theText.match(/[^\r\n]+|\r\n|\n|\r/g);
 			if(textComponents)
 			{
@@ -474,7 +518,7 @@ function createLogicalTextData(inItem)
 						currentTextLength = 0;
 
 					}
-				}
+				});
 			}	
 		}
 		else
@@ -497,6 +541,7 @@ function composeLine(inLine,inState)
 {
 	if(inLine.text.length > 0)
 	{
+
 		// compose line considering various items placement and direction
 		return renderParagraph(inLine,inState);
 	}
@@ -510,8 +555,7 @@ function composeLine(inLine,inState)
 		}
 		else
 		{
-			inState.startLine(inState.item.direction,0);
-			inState.height = lineHeight;
+			inState.startLine(inState.item.direction,0,lineHeight);
 			inState.reset();	
 			return true;		
 		}
@@ -521,19 +565,23 @@ function composeLine(inLine,inState)
 function renderParagraph(inLine,inState)
 {
 	var p = bidi.Paragraph(inLine.text,{paraLevel: inState.item.direction == 'rtl' ? bidi.DEFAULT_RTL:bidi.DEFAULT_LTR});
-	var textLength = inLine.text.length;
 
+	var textLength = inLine.text.length;
+	
 	var paraLevel=1&p.getParaLevel();
-	var direction = paraLevel == bidi.DEFAULT_RTL ? 'rtl':'ltr';
-	var measures=getTextMeasures(inLine.text,inLine.styles,inState);
+	var direction = ((paraLevel == bidi.RTL) ? 'rtl':'ltr');
+	var nonSpaceEndIndex = inLine.text.search(/[\s]*$/);
+	// i'm looking to trim ending spaces, for propper alignment (centering and the opposite)
+	var measures=getTextMeasures(p,inLine.text.substring(0,nonSpaceEndIndex),inLine.styles,inState);
+
 
 	if(measures.width<=inState.box.width
 		&& (inState.box.height == undefined || (inState.yOffset-measures.height*inState.lineSpacingModifier() >= inState.box.bottom)))
 	{
-		// everything fits onto one line
+		// everything fits onto one line	
 		// prepare rendering a new line from either left or right
-		inState.startLine(direction,width);
-		inState.renderLine(p,inLine.text,0,textLength, inLine.styles, 0,inLine.styles.length,inState);
+		inState.startLine(direction,measures.width,measures.height);
+		renderLine(p,inLine.text,0,nonSpaceEndIndex, inLine.styles, 0,inLine.styles.length,inState);
 		inState.reset();
 		return true;
 	}
@@ -541,38 +589,44 @@ function renderParagraph(inLine,inState)
 	{
 		var start=0, 
 			styleRunStart = 0,
-			rw = {limit:null, styleRunLimit:null,width:null,verticalOverflow:false},
+			rw = {limit:null, styleRunLimit:null,width:null,height:null,verticalOverflow:false},
 			skipSpaces = false; // skip spaces is for line start. any spaces should be skipped after a line that got broken
 
 		for(;;)
 		{
 			rw.limit = textLength;
 			rw.styleRunLimit = inLine.styles.length;
-			if(skipSpaces) // only false in the first line
+			if(skipSpaces) // only false in the first line. skip spaces in line breaks so that text start at line start.
 			{
 				var nonSpaceIndex = inLine.text.substr(start).search(/[^\s]/);
 				if(nonSpaceIndex != -1)
 				{
 					start+= nonSpaceIndex;
 					if(start == textLength) // if the skipped spaces are the end of the text
+					{
 						break;
+					}
 				}
 			}
 			rw =  getLineBreak(inLine.text,start,rw.limit,p,inLine.styles,styleRunStart,rw.styleRunLimit,inState);
-
+			
 			if(rw.verticalOverflow)
+			{
 				break;
+			}
 
 			var line = p.setLine(start,rw.limit);
 			// prepare rendering a new line
 			// from either left or right
-			inState.startLine(direction,rw.width);
-			inState.renderLine(line,inLine.text,start,rw.limit,inLine.styles,styleRunStart,rw.styleRunLimit-styleRunStart,inState);
+			inState.startLine(direction,rw.width,rw.height);
+			renderLine(line,inLine.text,start,rw.limit,inLine.styles,styleRunStart,rw.styleRunLimit-styleRunStart,inState);
 			inState.reset();
 			if(rw.limit == textLength)
+			{
 				break;
+			}
 			start = rw.limit;
-			styleRunStart=styleRunLimit-1;
+			styleRunStart=rw.styleRunLimit-1;
 			if(start>=inLine.styles[styleRunStart].limit)
 				++styleRunStart;
 
@@ -590,7 +644,7 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 	{
 		// unidirectional
 		if(inStyleRunsCount<=1)
-			renderRun(inText,inStart,inLimit,direction,inStylesRuns[inStyleRunsStart].style,inState);
+			inState.renderRun(inText,inStart,inLimit,direction,inStyleRuns[inStyleRunsStart].style,inState);
 		else
 			renderDirectionalRun(inText,inStart,inLimit,direction,inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
 	}
@@ -602,12 +656,12 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 		count = inBidiLine.countRuns();
 		if(inStyleRunsCount<=1)
 		{
-			style = inStylesRuns[inStyleRunsStart].style;
+			style = inStyleRuns[inStyleRunsStart].style;
 			// iterate over direcitonal runs
 			for(i=0;i<count;++i)
 			{
 				var visRun = inBidiLine.getVisualRun(i);
-				renderRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, style,inState);
+				inState.renderRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, style,inState);
 			}
 		}
 		else
@@ -635,7 +689,7 @@ function renderDirectionalRun(inText,inStart,inLimit,inDirection,inStyleRuns,inS
 			if(inStart < styleLimit)
 			{
 				if(styleLimit>inLimit) { styleLimit=inLimit; }
-				renderRun(inText,inStart,styleLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
+				inState.renderRun(inText,inStart,styleLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
 				if(styleLimit==inLimit) { break; }
 				inStart=styleLimit;
 			}
@@ -655,7 +709,7 @@ function renderDirectionalRun(inText,inStart,inLimit,inDirection,inStyleRuns,inS
 			if(inLimit>=styleStart)
 			{
 				if(styleStart<inStart) {styleStart=start;}
-				renderRun(inText,styleStart,inLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
+				inState.renderRun(inText,styleStart,inLimit,inDirection,inStyleRuns[inStyleRunsStart + i].style,inState);
 				if(styleStart == start){break;}
 				inLimit = styleStart;
 			}
@@ -674,7 +728,7 @@ function renderRun(inText,inStart,inLimit,inDirection,inStyle,inState)
 		if(inStyle.type == 'text')
 		{
 			theItem = shallowCopy(inStyle);
-			theItem.text = inText;
+			theItem.text = inText.substring(inStart,inLimit);
 		}
 		else
 		{
@@ -701,6 +755,41 @@ function renderRun(inText,inStart,inLimit,inDirection,inStyle,inState)
 	inState.height = Math.max(inState.height,itemMeasures.width);
 }
 
+function computeRun(inText,inStart,inLimit,inDirection,inStyle,inState)
+{
+	var itemMeasures;
+	if(inStyle.type !== undefined)
+	{
+		// regular item, place using regular method, with a new box stating it's position
+		var theItem;
+		if(inStyle.type == 'text')
+		{
+			theItem = shallowCopy(inStyle);
+			theItem.text = inText;
+		}
+		else
+		{
+			theItem = inStyle;
+		}
+		theItem.direction = inDirection;
+		var theBox = {left:inState.xOffset,bottom:inState.yOffset,items:[theItem]};
+		itemMeasures = getItemMeasures(theItem,theBox,inState.pdfWriter,inState.renderingState);
+	}
+	else
+	{
+		// a box. create a copy of the box, and replace the xOffset and yOffset
+		// ponder:replacing. should i add? right now will not support non-0 coordinates
+		// of box...oh well...we still have to figure out what its good for anyways
+		var newBox = shallowCopy(inStyle);
+		newBox.left = inState.xOffset;
+		newBox.bottom = inState.yOffset;
+		itemMeasures = calculateBoxMeasures(newBox,inState.pdfWriter,inState.renderingState);
+	}	
+
+	inState.xOffset += itemMeasures.width;
+	inState.height = Math.max(inState.height,itemMeasures.width);	
+}
+
 function getLineBreak(inText,inStart,inLimit,inBidi,inStyles,inStylesStart,inStylesLimit,inState)
 {
 	// getlinebreak will find a line break for content so that it can be placed in a line so that it
@@ -709,14 +798,14 @@ function getLineBreak(inText,inStart,inLimit,inBidi,inStyles,inStylesStart,inSty
 	// therefore if it can't place anything in the line, this will mark a necessary vertical overflow.
 
 	var maxWidth = inState.box.width;
-	var result = {width:0;limit:inStart,stylesLimit:inStylesStart};
+	var result = {width:0,limit:inStart,height:0,styleRunLimit:inStylesStart};
 	
 	// empty case
 	if(inLimit == inStart)
 		return result;
 
 	// advance styles start to an affective range
-	while(inStyles[result.stylesLimit].limit < inStart)
+	while(inStyles[result.styleRunLimit].limit < inStart)
 		++reslt.stylesLimit;
 
 	for(;;)
@@ -729,46 +818,66 @@ function getLineBreak(inText,inStart,inLimit,inBidi,inStyles,inStylesStart,inSty
 
 		// for each style in logical run. measure as style in full
 		// if good - go on [advance limit and style limit]. if not, need to break. 
-		while(result.stylesLimit<1 || inStyles[result.stylesLimit-1].limit<= logicalRun.limit)
+		while(result.styleRunLimit < inStylesLimit && (result.styleRunLimit<1 || inStyles[result.styleRunLimit-1].limit<= logicalRun.logicalLimit))
 		{
-			// get the width of the range result.limit...Math.min(result.stylesLimit,logicalRun.limit)
-			var runLimit = Math.min(inStyles[result.stylesLimit].limit,logicalRun.limit);
-			var runMeasures = getRunMeasures(inText,result.limit,runLimit,logicalRun.dir,inStyles[result.stylesLimit].style,inState);
+			// get the width of the range result.limit...Math.min(result.styleRunLimit,logicalRun.limit)
+			var runLimit = Math.min(inStyles[result.styleRunLimit].limit,logicalRun.logicalLimit);
+			var runMeasures = getRunMeasures(inText,result.limit,runLimit,logicalRun.dir,inStyles[result.styleRunLimit].style,inState);
 			if((result.width + runMeasures.width <=maxWidth) &&
 				(inState.box.height == undefined || (inState.yOffset-runMeasures.height*inState.lineSpacingModifier() >= inState.box.bottom)))
 			{
 				// add run/logical run in full
-				result.limit = runLimit;
-				if(runLimit == inStyles[reusult.stylesLimit].limit)
-					++result.stylesLimit;
+				
 				result.width+=runMeasures.width;
+				result.height = Math.max(runMeasures.height,result.height);
+				result.limit = runLimit;
+				if(runLimit == inStyles[result.styleRunLimit].limit)
+					++result.styleRunLimit;
+				else
+					break; // logical run finish...so finish
 			}
 			else
 			{
 				// got a break, break according to spaces, and finish
-				var textComponents = theText.substring(result.limit,runLimit).match(/[^\s]+|[^\S]+/g);
+				var textComponentsStart = result.limit;
+				var accumulatedWidth = 0;
+				var accumulatedLimitAdd = 0;
+				var accumulatedLimitAddToNonSpace = 0;
+				var textComponents = inText.substring(result.limit,runLimit).match(/[^\s]+|[^\S]+/g);
 				for(var i=0;i<textComponents.length;++i)
 				{
-					runMeasures = getRunMeasures(textComponents[i],0,textComponents[i].length,logicalRun.dir,inStyles[result.stylesLimit].style,inState);
+					runMeasures = getRunMeasures(inText,textComponentsStart,result.limit+accumulatedLimitAdd+textComponents[i].length,logicalRun.dir,inStyles[result.styleRunLimit].style,inState);
 					if((result.width + runMeasures.width <=maxWidth) &&
 						(inState.box.height == undefined || (inState.yOffset-runMeasures.height*inState.lineSpacingModifier() >= inState.box.bottom)))	
 					{
 						// add word/spaces in
-						result.limit+=textComponents[i].length;
-						result.width+=runMeasures.width;
+						accumulatedLimitAdd+=textComponents[i].length;
+						if(hasNonSpace(textComponents[i]))
+						{
+							accumulatedWidth=runMeasures.width; // add space to width ONLY when a later non space would show up. this should fix up the alignment problem nicely
+							accumulatedLimitAddToNonSpace = accumulatedLimitAdd;
+						}
+						result.height = Math.max(runMeasures.height,result.height);
+				
 					}
 					else
+					{
+						// add to width what accumulated so far
 						break;
+					}
 				}
+				// add accumulated width/range of what of the text that got in. take the measures so that will trim any ending spaces
+				result.width+=accumulatedWidth;
+				result.limit+=accumulatedLimitAddToNonSpace;
 				// advance style in 1 to get to the limit
-				++result.stylesLimit;				
+				++result.styleRunLimit;				
 				// force finish
-				logicalRun.limit = inLimit;
+				logicalRun.logicalLimit = inLimit;
 				break;
 			}
 		}
 
-		if(logicalRun.limit == inLimit) // ended text, break
+		if(logicalRun.logicalLimit == inLimit) // ended text, break
 			break;
 	}
 
@@ -796,6 +905,8 @@ function getRunMeasures(inText,inStart,inLimit,inDirection,inStyle,inState)
 		theItem.direction = inDirection;
 		var theBox = {left:0,bottom:0,items:[theItem]};
 		itemMeasures = getItemMeasures(theItem,theBox,inState.pdfWriter,inState.renderingState);
+		if(!inState.firstLine && inStyle.type == 'text') // when not the first relevant line height is actually the font size, not the text height
+			itemMeasures.height = inStyle.options.size;
 	}
 	else
 	{
@@ -810,12 +921,8 @@ function getRunMeasures(inText,inStart,inLimit,inDirection,inStyle,inState)
 	return itemMeasures;
 }
 
-function getTextMeasures(inText, inStyles,inState)
+function getTextMeasures(p,inText, inStyles,inState)
 {
-	// pretty much follows the line break algorithm, with less restraints
-
-	var p = bidi.Paragraph(inText,bidi.DEFAULT_LTR);
-
 	// total text width. loop through logical runs
 	var width=0,limit=0,stylesLimit=0,height =0;
 
@@ -824,20 +931,21 @@ function getTextMeasures(inText, inStyles,inState)
 		// advance by logicalRun and style run, adding to width
 		var logicalRun = p.getLogicalRun(limit);
 
-		// for each style in logical run. measure as style in full
-		// if good - go on [advance limit and style limit]. if not, need to break. 
-		while(stylesLimit<1 || inStyles[stylesLimit-1].limit<= logicalRun.limit)
+		while(stylesLimit<inStyles.length && (stylesLimit<1 || inStyles[stylesLimit-1].limit<= logicalRun.logicalLimit))
 		{
 			// get the width of the range result.limit...Math.min(result.stylesLimit,logicalRun.limit)
-			var runLimit = Math.min(inStyles[stylesLimit].limit,logicalRun.limit);
+			var runLimit = Math.min(inStyles[stylesLimit].limit,logicalRun.logicalLimit);
 			var runMeasures = getRunMeasures(inText,limit,runLimit,logicalRun.dir,inStyles[stylesLimit].style,inState);
-			// add run in full
-			if(runLimit == inStyles[stylesLimit].limit)
-				++stylesLimit;
+
 			width+=runMeasures.width;
 			height = Math.max(height,runMeasures.height);
+			limit = runLimit;
+			if(runLimit == inStyles[stylesLimit].limit)
+				++stylesLimit;
+			else
+				break; // if run limit is not style limit then it is the logical run limit. meaning - time to to move the next one
 		}
-		limit = logicalRun.limit;
+		limit = logicalRun.logicalLimit;
 	}
 
 	return {width:width,height:height};	
@@ -1078,7 +1186,7 @@ function getComosedStreamMeasures(inBox,inItem,inPDFWriter,inRenderingState)
 {	
 	// composition saves the lowest line positioning in lowestContentOffset. if not done yet, compose on empty and save now.
 	if(inItem.lowestContentOffset == undefined)
-		composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,function(){});
+		composeStreamItem(inBox,inItem,inPDFWriter,inRenderingState,computeRun);
 
 	return {bottom:inItem.lowestContentOffset,height:inItem.contentHeight};
 }
