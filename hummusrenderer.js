@@ -337,7 +337,17 @@ function calculateTextDimensions(inFont,inText,inFontSize)
 	// calculate the text measures. handles a bug where space only strings don't get their correct measures
 	if(hasNonSpace(inText))
 	{
-		return inFont.calculateTextDimensions(inText,inFontSize);
+		// may be ending with space, in which case i'll get the same problem as having spaces...so do a similar trick..with no height this time
+		if(inText.search(/[\s]*$/) != inText.length)
+		{
+			var measures = inFont.calculateTextDimensions(inText+'a',inFontSize);
+			var measuresA = inFont.calculateTextDimensions('a',inFontSize);
+			measures.width-=measuresA.xMax;
+			measures.xMax-=measuresA.xMax;
+			return measures;
+		}
+		else
+			return inFont.calculateTextDimensions(inText,inFontSize);
 	}
 	else
 	{
@@ -661,7 +671,7 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 			for(i=0;i<count;++i)
 			{
 				var visRun = inBidiLine.getVisualRun(i);
-				inState.renderRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, style,inState);
+				inState.renderRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.direction, style,inState);
 			}
 		}
 		else
@@ -669,7 +679,7 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 			for(i=0;i<count;++i)
 			{
 				var visRun = inBidiLine.getVisualRun(i);
-				renderDirectionalRun(inText, visRun.logicalStart, visRun.logicalStart+visRun.length, visRun.direction, inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
+				renderDirectionalRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.direction, inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
 			}
 		}
 	}
@@ -752,7 +762,7 @@ function renderRun(inText,inStart,inLimit,inDirection,inStyle,inState)
 	}	
 
 	inState.xOffset += itemMeasures.width;
-	inState.height = Math.max(inState.height,itemMeasures.width);
+	inState.height = Math.max(inState.height,itemMeasures.height);
 }
 
 function computeRun(inText,inStart,inLimit,inDirection,inStyle,inState)
