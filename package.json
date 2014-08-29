@@ -1,6 +1,6 @@
 {
   "name": "hummusrenderer",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "render PDF by declaration",
   "main": "hummusrenderer",
   "repository": {

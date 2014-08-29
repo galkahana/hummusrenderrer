@@ -366,7 +366,7 @@ function computeTextForItem(inItem)
 {
 	var theText = isArray(inItem.text) ? joinTextArray(inItem.text):inItem.text;
 
-	var p = bidi.Paragraph(theText,{paraLevel: inItem.direction == 'rtl' ? bidi.DEFAULT_RTL:bidi.DEFAULT_LTR});
+	var p = bidi.Paragraph(theText,{paraLevel: inItem.direction == 'rtl' ? bidi.RTL:bidi.LTR});
 
 	return p.writeReordered(bidi.Reordered.KEEP_BASE_COMBINING);
 }
@@ -574,7 +574,7 @@ function composeLine(inLine,inState)
 
 function renderParagraph(inLine,inState)
 {
-	var p = bidi.Paragraph(inLine.text,{paraLevel: inState.item.direction == 'rtl' ? bidi.DEFAULT_RTL:bidi.DEFAULT_LTR});
+	var p = bidi.Paragraph(inLine.text,{paraLevel: inState.item.direction == 'rtl' ? bidi.RTL:bidi.LTR});
 
 	var textLength = inLine.text.length;
 	
@@ -671,7 +671,7 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 			for(i=0;i<count;++i)
 			{
 				var visRun = inBidiLine.getVisualRun(i);
-				inState.renderRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.direction, style,inState);
+				inState.renderRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.dir, style,inState);
 			}
 		}
 		else
@@ -679,7 +679,7 @@ function renderLine(inBidiLine,inText,inStart,inLimit,inStyleRuns,inStyleRunsSta
 			for(i=0;i<count;++i)
 			{
 				var visRun = inBidiLine.getVisualRun(i);
-				renderDirectionalRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.direction, inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
+				renderDirectionalRun(inText, inStart+visRun.logicalStart, inStart+visRun.logicalStart+visRun.length, visRun.dir, inStyleRuns,inStyleRunsStart,inStyleRunsCount,inState);
 			}
 		}
 	}
