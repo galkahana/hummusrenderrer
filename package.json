@@ -1,6 +1,6 @@
 {
   "name": "hummusrenderer",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "render PDF by declaration",
   "main": "hummusrenderer",
   "repository": {
@@ -14,7 +14,7 @@
   "dependencies": {
     "hummus": "^1.0.33",
     "temporary": "0.0.8",
-    "icu-bidi": "git+https://git@github.com/galkahana/node-icu-bidi.git"
+    "icu-bidi-galkahana": ""
   },
   "homepage": "http://pdfhummus.com",
   "author": "Gal Kahana <gal.kahana@hotmail.com>",
