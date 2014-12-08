@@ -16,7 +16,18 @@ module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 			state.externalsLocalFiles = inDownloadMap;
 			try
 			{
-				var writer = hummus.createWriter(inTargetStream,inOptions);
+				var writer;
+
+				if(inDocument.source)
+				{
+					state.modifiedFileStream = new hummus.PDFRStreamForFile(inDocument.source.path ? 
+																				inDocument.source.path : 
+																				state.getLocalFile(inDocument.source.external));
+					state.isModification = true;
+					writer = hummus.createWriterToModify(state.modifiedFileStream,inTargetStream);
+				}
+				else
+					writer = hummus.createWriter(inTargetStream,inOptions);
 
 				renderDocument(inDocument,writer,state);
 
@@ -48,7 +59,7 @@ function RenderingState()
 
 RenderingState.prototype.getLocalFile = function(inExternalName)
 {
-	return this.externalsLocalFiles(inExternalName);
+	return this.externalsLocalFiles[inExternalName];
 };
 
 
@@ -121,6 +132,60 @@ function downloadFile(inFileURL,inTargetFilePath,inCallback)
 	});	
 }
 
+function NewPageDriver(inPDFWriter,inWidth,inHeight)
+{
+	this.pdfWriter = inPDFWriter;
+	this.pdfPage = inPDFWriter.createPage(0,0,inWidth,inHeight);
+}
+
+NewPageDriver.prototype.startContentContext = function()
+{
+	return this.pdfWriter.startPageContentContext(this.pdfPage);
+}
+
+NewPageDriver.prototype.writePage = function(inLinks)
+{
+	if(inLinks.length > 0)
+	{
+		this.pdfWriter.pausePageContentContext(this.pdfWriter.startPageContentContext(this.pdfPage));
+		var self = this;
+		inLinks.forEach(function(link)
+		{
+			self.pdfWriter.attachURLLinktoCurrentPage(link.link,link.rect[0],link.rect[1],link.rect[2],link.rect[3]);
+		});		
+	}
+
+	this.pdfWriter.writePage(this.pdfPage);
+}
+
+function ModifiedPageDriver(inPDFWriter,inPageIndex)
+{
+	this.pdfWriter = inPDFWriter;
+	this.pageModifier = new hummus.PDFPageModifier(inPDFWriter,inPageIndex);
+}
+
+ModifiedPageDriver.prototype.startContentContext = function()
+{
+	return this.pageModifier.startContext().getContext();
+}
+
+ModifiedPageDriver.prototype.writePage = function(inLinks)
+{
+	if(this.pageModifier.getContext())
+		this.pageModifier.endContext();
+
+	if(inLinks.length > 0)
+	{
+		var self = this;
+		inLinks.forEach(function(link)
+		{
+			self.pageModifier.attachURLLinktoCurrentPage(link.link,link.rect[0],link.rect[1],link.rect[2],link.rect[3]);
+		});		
+	}
+
+	this.pageModifier.writePage();
+}
+
 // main rendering method (when all externals are downloaded)
 function renderDocument(inDocument,inPDFWriter,inRenderingState)
 {
@@ -133,30 +198,29 @@ function renderDocument(inDocument,inPDFWriter,inRenderingState)
 	inDocument.pages.forEach(function(inPage)
 	{
 		inRenderingState.links = [];
-		// accumulate required properties [syntax test]
-		width = inPage.width || width;
-		height = inPage.height || height;
+		var thePageDriver;
+		if(inPage.modifiedFrom !== undefined)
+		{
+			thePageDriver = new ModifiedPageDriver(inPDFWriter,inPage.modifiedFrom);
+		}
+		else
+		{
+			// accumulate required properties [syntax test]
+			width = inPage.width || width;
+			height = inPage.height || height;
+			thePageDriver = new NewPageDriver(inPDFWriter,width,height);
+		}
 
-		var pdfPage = inPDFWriter.createPage(0,0,width,height);
 		// render boxes
 		if(inPage.boxes)
 		{
 			inPage.boxes.forEach(function(inBox)
 			{
-				renderBox(inBox,pdfPage,inPDFWriter,inRenderingState);
+				renderBox(inBox,thePageDriver,inPDFWriter,inRenderingState);
 			});
 		}
 
-		if(inRenderingState.links.length > 0)
-		{
-			inPDFWriter.pausePageContentContext(inPDFWriter.startPageContentContext(pdfPage));
-			inRenderingState.links.forEach(function(link)
-			{
-				inPDFWriter.attachURLLinktoCurrentPage(link.link,link.rect[0],link.rect[1],link.rect[2],link.rect[3]);
-			});
-		}
-		
-		inPDFWriter.writePage(pdfPage);
+		thePageDriver.writePage(inRenderingState.links);
 	});
 }
 
@@ -237,10 +301,10 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
 	var imagePath = inRenderingState.getImageItemFilePath(inItem);
 	if(imagePath)
-		inPDFWriter.startPageContentContext(inPDFPage).drawImage(left,inBox.bottom,imagePath,opts);	
+		inPDFPage.startContentContext().drawImage(left,inBox.bottom,imagePath,opts);	
 
-	if(inItem.link)
-		inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
+	//if(inItem.link)
+	//	inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
 
 }
 
@@ -274,14 +338,14 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	switch(inItem.method)
 	{
 		case 'rectangle':
-			inPDFWriter.startPageContentContext(inPDFPage).drawRectangle(left,inBox.bottom,inItem.width,inItem.height,inItem.options);
+			inPDFPage.startContentContext().drawRectangle(left,inBox.bottom,inItem.width,inItem.height,inItem.options);
 			break;
 		case 'square':
-			inPDFWriter.startPageContentContext(inPDFPage).drawSquare(left,inBox.bottom,inItem.width,inItem.options);
+			inPDFPage.startContentContext().drawSquare(left,inBox.bottom,inItem.width,inItem.options);
 			break;
 		case 'circle':
 			// translate bottom/left to center
-			inPDFWriter.startPageContentContext(inPDFPage).drawCircle(left+inItem.radius,inBox.bottom+inItem.radius,inItem.radius,inItem.options);
+			inPDFPage.startContentContext().drawCircle(left+inItem.radius,inBox.bottom+inItem.radius,inItem.radius,inItem.options);
 			break;
 		case 'path':
 			// translate bottom left to paths points
@@ -293,7 +357,7 @@ function renderShapeItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 			}
 			if(inItem.options)
 				args.push(inItem.options);
-			var cxt = inPDFWriter.startPageContentContext(inPDFPage);
+			var cxt = inPDFPage.startContentContext();
 			cxt.drawPath.apply(cxt,args);
 			break;
 	}
@@ -317,7 +381,7 @@ function renderTextItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 
 	var left = getLeftForAlignment(inBox,inItem,inPDFWriter,inRenderingState);
 
-	inPDFWriter.startPageContentContext(inPDFPage).writeText(theText,left,inBox.bottom,inItem.options);
+	inPDFPage.startContentContext().writeText(theText,left,inBox.bottom,inItem.options);
 
 
 	if(inItem.link)

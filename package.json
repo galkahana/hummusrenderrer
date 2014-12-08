@@ -1,6 +1,6 @@
 {
   "name": "hummusrenderer",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "render PDF by declaration",
   "main": "hummusrenderer",
   "repository": {
@@ -12,7 +12,7 @@
     "pdfhummus"
   ],
   "dependencies": {
-    "hummus": "^1.0.33",
+    "hummus":"",
     "temporary": "0.0.8",
     "icu-bidi-galkahana": ""
   },
