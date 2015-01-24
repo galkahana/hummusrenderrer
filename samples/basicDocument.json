@@ -1,6 +1,6 @@
 {
 	"externals": {
-			"myLogo":"https://fbcdn-profile-a.akamaihd.net/hprofile-ak-xpa1/t1.0-1/c11.0.160.160/p160x160/1891153_10152151031518898_506486178_n.jpg"
+			"myLogo":"http://pdfrendering.herokuapp.com/profileImage.jpg"
 
 	},
 	"pages": [

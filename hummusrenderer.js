@@ -2,7 +2,7 @@ var hummus = require('hummus'),
 	tmp = require('temporary'),
 	http = require('http'),
 	https = require('https'),
-	bidi = require('icu-bidi-galkahana'),
+	bidi = require('icu-bidi'),
 	fs = require('fs');
 
 
@@ -24,7 +24,7 @@ module.exports.render = function(inDocument,inTargetStream,inOptions,inCallback)
 																				inDocument.source.path : 
 																				state.getLocalFile(inDocument.source.external));
 					state.isModification = true;
-					writer = hummus.createWriterToModify(state.modifiedFileStream,inTargetStream);
+					writer = hummus.createWriterToModify(state.modifiedFileStream,inTargetStream,inOptions);
 				}
 				else
 					writer = hummus.createWriter(inTargetStream,inOptions);
@@ -303,8 +303,8 @@ function renderImageItem(inBox,inItem,inPDFPage,inPDFWriter,inRenderingState)
 	if(imagePath)
 		inPDFPage.startContentContext().drawImage(left,inBox.bottom,imagePath,opts);	
 
-	//if(inItem.link)
-	//	inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
+	if(inItem.link)
+		inRenderingState.links.push({link:inItem.link,rect:[left,inBox.bottom,left+imageItemMeasures.width,inBox.bottom+imageItemMeasures.height]});
 
 }
 
