@@ -2,7 +2,7 @@ var hummus = require('hummus'),
 	tmp = require('temporary'),
 	http = require('http'),
 	https = require('https'),
-	bidi = require('gal-icu-bidi'),
+	bidi = require('icu-bidi'),
 	fs = require('fs');
 
 
